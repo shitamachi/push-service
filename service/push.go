@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"github.com/go-redis/redis/v8"
 	"github.com/mitchellh/mapstructure"
@@ -146,7 +147,7 @@ func CreateConsumer(ctx context.Context, consumerName string, processFunc func(c
 
 		for _, stream := range streams {
 			for _, message := range stream.Messages {
-				err := processFunc(ctx, &message)
+				err = processFunc(ctx, &message)
 				if err != nil {
 					log.Logger.Error("consumer streams failed",
 						zap.Error(err),
@@ -198,7 +199,7 @@ func processPushMessage(ctx context.Context, message *redis.XMessage) error {
 	client := getProcessPushMessageClient(psm.AppId)
 	if client == nil {
 		log.Logger.Error("processPushMessage: can not get push message client")
-		return fmt.Errorf("can not get push message client")
+		return errors.New("can not get push message client")
 	}
 	err = client.Push(ctx, psm.AppId, psm.Message, psm.Token, nil)
 	if err != nil {
@@ -209,6 +210,10 @@ func processPushMessage(ctx context.Context, message *redis.XMessage) error {
 }
 
 func getProcessPushMessageClient(appID string) push.Pusher {
+	if len(appID) <= 0 {
+		return nil
+	}
+
 	item, ok := config.GlobalConfig.ClientConfig[appID]
 	if ok {
 		switch item.PushType {

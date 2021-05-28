@@ -14,4 +14,5 @@ require (
 	go.uber.org/zap v1.16.0
 	golang.org/x/net v0.0.0-20210510120150-4163338589ed // indirect
 	google.golang.org/api v0.40.0
+	gopkg.in/natefinch/lumberjack.v2 v2.0.0
 )

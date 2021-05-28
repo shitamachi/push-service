@@ -4,6 +4,7 @@ import (
 	"github.com/shitamachi/push-service/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"gopkg.in/natefinch/lumberjack.v2"
 	"os"
 	"path/filepath"
 )
@@ -68,12 +69,17 @@ func newReleaseEncoder() zapcore.Encoder {
 }
 
 func getLogWriter() zapcore.WriteSyncer {
-	EnsureDirExisted(config.GlobalConfig.LogFilePath)
-	file, err := os.Create(config.GlobalConfig.LogFilePath)
-	if err != nil {
-		panic(err)
+	logPath := config.GlobalConfig.LogFilePath
+	EnsureDirExisted(logPath)
+	writer := &lumberjack.Logger{
+		Filename:   logPath,
+		MaxSize:    10,
+		MaxAge:     7,
+		MaxBackups: 10,
+		LocalTime:  true,
+		Compress:   false,
 	}
-	return zapcore.AddSync(file)
+	return zapcore.AddSync(writer)
 }
 
 func EnsureDirExisted(paths ...string) {

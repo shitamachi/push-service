@@ -6,7 +6,6 @@ import (
 	"errors"
 	"firebase.google.com/go/v4/messaging"
 	"fmt"
-	"github.com/json-iterator/go"
 	"github.com/shitamachi/push-service/api"
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/db"
@@ -18,6 +17,7 @@ import (
 	"github.com/sideshow/apns2"
 	"go.uber.org/zap"
 	"net/http"
+	"reflect"
 	"time"
 )
 
@@ -126,7 +126,33 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 
 		switch item.PushType {
 		case "apple":
-			client := push.GetApplePushClient()
+			v, ok := push.GlobalApplePushClient.GetClientByAppID(req.AppId)
+			if !ok {
+				log.Logger.Error("can not get apple push client by app id", zap.String("bundle_id", req.AppId))
+				resp = append(resp, PushMessageResp{
+					UserId:       token.UserID,
+					Token:        token.Token,
+					PushStatus:   0,
+					PushResult:   "",
+					PlatformResp: nil,
+					Error:        fmt.Errorf("can not get apple push client by app id %s", req.AppId),
+				})
+				break
+			}
+			client, ok := v.(*apns2.Client)
+			if !ok {
+				log.Logger.Error("ApplePush: got client value from global instance, but convert to *apns2.Client failed",
+					zap.String("type", reflect.TypeOf(client).String()))
+				resp = append(resp, PushMessageResp{
+					UserId:       token.UserID,
+					Token:        token.Token,
+					PushStatus:   0,
+					PushResult:   "",
+					PlatformResp: nil,
+					Error:        fmt.Errorf("get client ok but can not convert client value to *apns2.Client %s", req.AppId),
+				})
+				continue
+			}
 			rep, err := client.Push(&apns2.Notification{
 				DeviceToken: token.Token,
 				Topic:       token.AppID,
@@ -144,7 +170,36 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 			respItem.Error = err
 			respItem.PlatformResp = rep
 		case "firebase":
-			client := push.GetFcmClient()
+			// get push message client
+			value, ok := push.GlobalFirebasePushClient.GetClientByAppID(req.AppId)
+			if !ok || value == nil {
+				log.Logger.Error("Firebase Push: can not get push client, value is nil or get operation not ok")
+				resp = append(resp, PushMessageResp{
+					UserId:       token.UserID,
+					Token:        token.Token,
+					PushStatus:   0,
+					PushResult:   "",
+					PlatformResp: nil,
+					Error:        fmt.Errorf("can not get firebase push client by app id %s", req.AppId),
+				})
+				continue
+			}
+			client, ok := value.(*messaging.Client)
+			if !ok {
+				log.Logger.Error("Push: got firebase client value from global instance, but convert to *messaging.Client failed",
+					zap.String("type", reflect.TypeOf(client).String()))
+
+				resp = append(resp, PushMessageResp{
+					UserId:       token.UserID,
+					Token:        token.Token,
+					PushStatus:   0,
+					PushResult:   "",
+					PlatformResp: nil,
+					Error:        fmt.Errorf("can not convert client value to *messaging.Client"),
+				})
+				continue
+			}
+
 			res, err := client.SendAll(c.Req.Context(), []*messaging.Message{
 				{
 					Notification: &messaging.Notification{
@@ -247,48 +302,44 @@ func BatchPushMessage(c *api.Context) api.ResponseOptions {
 				PushMessageReqItem: reqItem,
 			}
 
+			ctx := context.Background()
+
 			switch item.PushType {
 			case "apple":
-				client := push.GetApplePushClient()
-				rep, err := client.Push(&apns2.Notification{
-					DeviceToken: token.Token,
-					Topic:       token.AppID,
-					//example: {"aps":{"alert":"Hello!"}}
-					Payload: []byte(reqItem.Message),
-				})
+				rep, err := push.GlobalApplePushClient.
+					Push(ctx, token.AppID, reqItem.Message, token.Token, nil)
 
-				if err == nil && rep.StatusCode == http.StatusOK {
-					respItem.PushStatus = 1
-				} else {
+				response, ok := rep.(*apns2.Response)
+				if !ok {
+					log.Logger.Error("apple push can not convert request response top apns2.Response type",
+						zap.String("type", reflect.TypeOf(rep).String()))
+					continue
+				}
+
+				if err != nil || response.StatusCode != http.StatusOK {
 					respItem.PushStatus = 0
+				} else {
+					respItem.PushStatus = 1
 				}
 
 				respItem.Error = err
 				respItem.PlatformResp = rep
 
 			case "firebase":
-				client := push.GetFcmClient()
-				reqMessage := PushMessageFirebaseItem{}
-				err := jsoniter.Unmarshal([]byte(reqItem.Message), &reqMessage)
-				if err != nil {
-					log.Logger.Error("can not unmarshal the request message, value: %v err: %v",
-						zap.Any("message", reqItem.Message),
-						zap.Error(err),
-					)
+				rep, err := push.GlobalApplePushClient.Push(ctx, token.AppID, reqItem.Message, token.Token, nil)
+
+				batchResponse, ok := rep.(*messaging.BatchResponse)
+				if !ok {
+					log.Logger.Error("can not convert request response top firebase *BatchResponse type",
+						zap.String("type", reflect.TypeOf(rep).String()))
 					continue
 				}
-				res, err := client.SendAll(c.Req.Context(), []*messaging.Message{
-					{
-						Notification: &messaging.Notification{
-							Title:    reqMessage.Title,
-							Body:     reqMessage.Body,
-							ImageURL: reqMessage.ImageURL,
-						},
-						Data:  reqMessage.Data,
-						Token: token.Token,
-					},
-				})
 
+				if err != nil || batchResponse.SuccessCount <= 0 || !batchResponse.Responses[0].Success {
+					respItem.PushStatus = 1
+				} else {
+					respItem.PushStatus = 0
+				}
 				if err != nil {
 					respItem.PushStatus = 0
 					respItem.Error = err
@@ -296,7 +347,6 @@ func BatchPushMessage(c *api.Context) api.ResponseOptions {
 				} else {
 					respItem.PushStatus = 1
 				}
-				respItem.PlatformResp = res
 			default:
 				respItem.PushStatus = 0
 				respItem.Reason = "unknown push type"

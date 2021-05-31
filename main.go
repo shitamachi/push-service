@@ -37,7 +37,7 @@ func main() {
 	cache.InitRedis()
 
 	push.InitApplePush()
-	push.InitFirebase()
+	push.InitFirebasePush()
 
 	// init queue
 	ctx := context.Background()

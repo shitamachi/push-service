@@ -26,13 +26,27 @@
     }
   },
   "apple_push_config": {
-    "bundle_id": "your ios app bundle id",
-    "auth_key": "key file content",
-    "key_id": "key id",
-    "team_id": "team id"
+    "ios_app_bundle_id_1": {
+      "bundle_id": "ios_app_bundle_id_1",
+      "auth_key": "key file content",
+      "key_id": "key id",
+      "team_id": "team id"
+    },
+    "ios_app_bundle_id_2": {
+      "bundle_id": "ios_app_bundle_id_2",
+      "auth_key": "key file content",
+      "key_id": "key id",
+      "team_id": "team id"
+    }
   },
   "firebase_push_config": {
-    "package_name": "your android app package name",
-    "service_account_file_content": "your firebase service account file content"
+    "package_name_a": {
+      "package_name": "package_name_a",
+      "service_account_file_content": "your firebase service account file content"
+    },
+    "package_name_b": {
+      "package_name": "package_name_b",
+      "service_account_file_content": "your firebase service account file content"
+    }
   }
 }

@@ -13,6 +13,7 @@ import (
 	"github.com/shitamachi/push-service/push"
 	"go.uber.org/zap"
 	"sync"
+	"time"
 )
 
 const (
@@ -148,6 +149,16 @@ func CreateConsumer(ctx context.Context, consumerName string, processFunc func(c
 		for _, stream := range streams {
 			for _, message := range stream.Messages {
 				err = processFunc(ctx, &message)
+
+				count, outAckErr := cache.Client.XAck(ctx, PushMessageStreamKey, PushMessageGroupKey, message.ID).Result()
+				if outAckErr != nil {
+					log.Logger.Error("ack message failed",
+						zap.String("consumer_name", consumerName),
+						zap.Error(outAckErr),
+						zap.String("message_id", message.ID))
+					continue
+				}
+
 				if err != nil {
 					log.Logger.Error("consumer streams failed",
 						zap.Error(err),
@@ -170,14 +181,6 @@ func CreateConsumer(ctx context.Context, consumerName string, processFunc func(c
 					}
 					continue
 				} else {
-					count, err := cache.Client.XAck(ctx, PushMessageStreamKey, PushMessageGroupKey, message.ID).Result()
-					if err != nil {
-						log.Logger.Error("ack message failed",
-							zap.String("consumer_name", consumerName),
-							zap.Error(err),
-							zap.String("message_id", message.ID))
-						continue
-					}
 					log.Logger.Info("consumer message successfully",
 						zap.String("consumer_name", consumerName),
 						zap.Int64("ack_count", count),
@@ -201,7 +204,11 @@ func processPushMessage(ctx context.Context, message *redis.XMessage) error {
 		log.Logger.Error("processPushMessage: can not get push message client")
 		return errors.New("can not get push message client")
 	}
-	err = client.Push(ctx, psm.AppId, psm.Message, psm.Token, nil)
+
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	_, err = client.Push(ctx, psm.AppId, psm.Message, psm.Token, nil)
 	if err != nil {
 		log.Logger.Error("processPushMessage: send push failed", zap.Error(err))
 		return err
@@ -218,9 +225,9 @@ func getProcessPushMessageClient(appID string) push.Pusher {
 	if ok {
 		switch item.PushType {
 		case config_entries.ApplePush:
-			return push.NewApplePushClient()
+			return push.GlobalApplePushClient
 		case config_entries.FirebasePush:
-			return push.NewFirebasePushClient()
+			return push.GlobalFirebasePushClient
 		default:
 			log.Logger.Error("getProcessPushMessageClient: can not match app id with anyone in config",
 				zap.String("app_id", appID))

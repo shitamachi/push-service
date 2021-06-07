@@ -1,9 +1,10 @@
-FROM golang:1.16
+FROM golang:1.16.5-alpine3.13
 
 WORKDIR /go/src/app
 COPY . .
 COPY   conf.json ./conf
-RUN mkdir -p /data/log && make build-linux
+RUN apk add make \
+    && mkdir -p /data/log && make build-linux
 
 EXPOSE 8899
 

@@ -138,18 +138,19 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 		return api.ErrorWithOpts(http.StatusNotFound, api.Message("can not found any record which will be used to push"))
 	}
 
-	var resp = make([]PushMessageResp, 0)
+	var resp PushMessageResp
 	for _, token := range tokens {
 		item, ok := config.GlobalConfig.ClientConfig[req.AppId]
 		if !ok {
-			resp = append(resp, PushMessageResp{
+			resp = PushMessageResp{
 				UserId:       token.UserID,
 				Token:        token.Token,
 				PushStatus:   0,
 				PushResult:   "",
 				PlatformResp: nil,
 				Error:        errors.New("request app ID cannot match any of the items in the configuration file"),
-			})
+			}
+			continue
 		}
 
 		respItem := PushMessageResp{
@@ -162,28 +163,28 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 			v, ok := push.GlobalApplePushClient.GetClientByAppID(req.AppId)
 			if !ok {
 				log.Logger.Error("can not get apple push client by app id", zap.String("bundle_id", req.AppId))
-				resp = append(resp, PushMessageResp{
+				resp = PushMessageResp{
 					UserId:       token.UserID,
 					Token:        token.Token,
 					PushStatus:   0,
 					PushResult:   "",
 					PlatformResp: nil,
 					Error:        fmt.Errorf("ApplePush: can not get apple push client by app id %s", req.AppId),
-				})
+				}
 				break
 			}
 			client, ok := v.(*apns2.Client)
 			if !ok {
 				log.Logger.Error("ApplePush: got client value from global instance, but convert to *apns2.Client failed",
 					zap.String("type", reflect.TypeOf(client).String()))
-				resp = append(resp, PushMessageResp{
+				resp = PushMessageResp{
 					UserId:       token.UserID,
 					Token:        token.Token,
 					PushStatus:   0,
 					PushResult:   "",
 					PlatformResp: nil,
 					Error:        fmt.Errorf("inner error: get client ok but can not convert client value to *apns2.Client %s", req.AppId),
-				})
+				}
 				continue
 			}
 			msg, _ := req.Message.Bytes()
@@ -207,14 +208,14 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 			value, ok := push.GlobalFirebasePushClient.GetClientByAppID(req.AppId)
 			if !ok || value == nil {
 				log.Logger.Error("Firebase Push: can not get push client, value is nil or get operation not ok")
-				resp = append(resp, PushMessageResp{
+				resp = PushMessageResp{
 					UserId:       token.UserID,
 					Token:        token.Token,
 					PushStatus:   0,
 					PushResult:   "",
 					PlatformResp: nil,
 					Error:        fmt.Errorf("can not get firebase push client by app id %s", req.AppId),
-				})
+				}
 				continue
 			}
 			client, ok := value.(*messaging.Client)
@@ -222,14 +223,14 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 				log.Logger.Error("Push: got firebase client value from global instance, but convert to *messaging.Client failed",
 					zap.String("type", reflect.TypeOf(client).String()))
 
-				resp = append(resp, PushMessageResp{
+				resp = PushMessageResp{
 					UserId:       token.UserID,
 					Token:        token.Token,
 					PushStatus:   0,
 					PushResult:   "",
 					PlatformResp: nil,
 					Error:        fmt.Errorf("inner error: can not convert client value to *messaging.Client"),
-				})
+				}
 				continue
 			}
 
@@ -259,7 +260,7 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 			respItem.Error = errors.New("unknown push type")
 		}
 
-		resp = append(resp, respItem)
+		resp = respItem
 	}
 
 	return api.Ok(resp)

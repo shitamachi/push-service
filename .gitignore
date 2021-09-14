@@ -21,7 +21,8 @@ vendor/
 .idea/
 
 # config
-conf/conf.json
+conf/*
+!conf/*.example.json
 
 # default log dir
 tmp_log/

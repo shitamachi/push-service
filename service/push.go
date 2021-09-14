@@ -10,6 +10,7 @@ import (
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/config/config_entries"
 	"github.com/shitamachi/push-service/log"
+	"github.com/shitamachi/push-service/mq"
 	"github.com/shitamachi/push-service/push"
 	"go.uber.org/zap"
 	"sync"
@@ -32,11 +33,24 @@ func InitSendPushQueue(ctx context.Context) {
 		}
 		log.Logger.Info("InitSendPushQueue: CreateMQGroup successfully")
 
+		// create consumer
 		for i := 0; i < 5; i++ {
 			go func(i int) {
 				CreateConsumer(ctx, fmt.Sprintf("push_message_consumer_%d_%d", config.GlobalConfig.WorkerID, i), processPushMessage)
 			}(i)
 		}
+
+		// handle pending message
+		go func() {
+			for t := range time.Tick(1 * time.Minute) {
+				log.Logger.Debug("ClaimPendingMessage: run claim pending message task", zap.Time("t", t))
+				err := mq.ClaimPendingMessage(ctx, PushMessageStreamKey, PushMessageGroupKey)
+				if err != nil {
+					log.Logger.Error("ClaimPendingMessage: exit claim pending message", zap.Error(err))
+					return
+				}
+			}
+		}()
 	})
 }
 
@@ -117,7 +131,7 @@ func CreateConsumer(ctx context.Context, consumerName string, processFunc func(c
 	for {
 		// Pick the ID based on the iteration: the first time we want to
 		// read our pending messages, in case we crashed and are recovering.
-		// Once we consumer our history, we can start getting new messages.
+		// Once we consume our history, we can start getting new messages.
 		var consumerId string
 		if checkBackLog {
 			consumerId = lastId
@@ -160,27 +174,14 @@ func CreateConsumer(ctx context.Context, consumerName string, processFunc func(c
 				}
 
 				if err != nil {
+					go RecordPushMessageStatus(0)
 					log.Logger.Error("consumer streams failed",
 						zap.Error(err),
 						zap.String("consumer_name", consumerName),
 						zap.String("message_id", message.ID))
-					result, err := cache.Client.XDel(ctx, PushMessageStreamKey, message.ID).Result()
-					if err != nil {
-						log.Logger.Error("del message failed",
-							zap.String("consumer_name", consumerName),
-							zap.Error(err),
-							zap.String("message_id", message.ID),
-							zap.Int64("del_count", result),
-						)
-					} else {
-						log.Logger.Info("del message successfully",
-							zap.String("consumer_name", consumerName),
-							zap.String("message_id", message.ID),
-							zap.Int64("del_count", result),
-						)
-					}
 					continue
 				} else {
+					go RecordPushMessageStatus(1)
 					log.Logger.Info("consumer message successfully",
 						zap.String("consumer_name", consumerName),
 						zap.Int64("ack_count", count),
@@ -237,5 +238,23 @@ func getProcessPushMessageClient(appID string) push.Pusher {
 		log.Logger.Error("getProcessPushMessageClient: can not get push client item form config by app id",
 			zap.String("app_id", appID))
 		return nil
+	}
+}
+
+func RecordPushMessageStatus(status int) {
+	key := fmt.Sprintf("push_status_%s", time.Now().Format("2006_01_02"))
+	switch status {
+	case 0:
+		cache.Client.ZIncr(context.Background(), key, &redis.Z{
+			Score:  1,
+			Member: "fail",
+		})
+	case 1:
+		cache.Client.ZIncr(context.Background(), key, &redis.Z{
+			Score:  1,
+			Member: "success",
+		})
+	default:
+		log.Logger.Error("RecordPushMessageStatus: wrong status value")
 	}
 }

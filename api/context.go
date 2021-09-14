@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
 )
@@ -11,13 +12,17 @@ type Context struct {
 	Req    *http.Request
 }
 
-type ResponseData = interface{}
+type ResponseData interface{}
 
 type ResponseEntry struct {
-	Status    int          `json:"status"`
-	Message   string       `json:"message"`
-	Data      ResponseData `json:"data,omitempty"`
-	Timestamp int64        `json:"timestamp"`
+	// 内部状态码
+	Status int `json:"status"`
+	// 响应信息
+	Message string `json:"message"`
+	// 实际的返回响应
+	Data interface{} `json:"data,omitempty"`
+	// 响应时间戳
+	Timestamp int64 `json:"timestamp"`
 }
 
 type Response struct {
@@ -79,6 +84,26 @@ func HandleFunc(pattern string, f func(ctx *Context) []ResponseOption) {
 		//goland:noinspection ALL
 		writer.Write(bytes)
 	})
+}
+
+func WrapperGinHandleFunc(f func(ctx *Context) []ResponseOption) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		responseOptions := f(&Context{
+			Writer: c.Writer,
+			Req:    c.Request,
+		})
+		response := NewResponse(responseOptions)
+
+		bytes, err := json.Marshal(response)
+		if err != nil {
+			c.Writer.WriteHeader(http.StatusInternalServerError)
+			return
+		}
+
+		c.Writer.WriteHeader(response.HttpCode)
+		//goland:noinspection ALL
+		c.Writer.Write(bytes)
+	}
 }
 
 func NewResponse(opts []ResponseOption) *Response {

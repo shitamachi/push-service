@@ -1,0 +1,298 @@
+{
+    "swagger": "2.0",
+    "info": {
+        "description": "push service http server",
+        "title": "Push Service API",
+        "termsOfService": "http://swagger.io/terms/",
+        "contact": {
+            "name": "API Support",
+            "url": "http://www.swagger.io/support",
+            "email": "support@swagger.io"
+        },
+        "license": {
+            "name": "Apache 2.0",
+            "url": "http://www.apache.org/licenses/LICENSE-2.0.html"
+        },
+        "version": "1.0"
+    },
+    "host": "petstore.swagger.io",
+    "basePath": "/v1",
+    "paths": {
+        "/v1/batch_push_messages": {
+            "post": {
+                "description": "批量推送消息; 如果请求体中设置了 global_message, 那么所有消息列表中的推送消息将为 global_message, 如果具体消息里单独设置了 message 那么将会覆盖掉 global_message",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "push"
+                ],
+                "summary": "批量推送消息",
+                "operationId": "batch-push-messages",
+                "parameters": [
+                    {
+                        "description": "messages",
+                        "name": "message",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.BatchPushMessageReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.ResponseEntry"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/handler.BatchPushMessageRespItem"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    },
+                    "500": {
+                        "description": "内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    }
+                }
+            }
+        },
+        "/v1/push_messages": {
+            "post": {
+                "description": "推送单个消息",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "push"
+                ],
+                "summary": "推送单个消息 push",
+                "operationId": "push-messages",
+                "parameters": [
+                    {
+                        "description": "message",
+                        "name": "message",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.PushMessageReqItem"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.ResponseEntry"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "type": "array",
+                                            "items": {
+                                                "$ref": "#/definitions/handler.PushMessageResp"
+                                            }
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    },
+                    "404": {
+                        "description": "无法从请求的 user_id 或是 token 查找到对应数据",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    },
+                    "500": {
+                        "description": "Internal Server Error",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "definitions": {
+        "api.ResponseEntry": {
+            "type": "object",
+            "properties": {
+                "data": {
+                    "description": "实际的返回响应",
+                    "type": "object"
+                },
+                "message": {
+                    "description": "响应信息",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "内部状态码",
+                    "type": "integer"
+                },
+                "timestamp": {
+                    "description": "响应时间戳",
+                    "type": "integer"
+                }
+            }
+        },
+        "handler.BatchPushMessageReq": {
+            "type": "object",
+            "properties": {
+                "global_message": {
+                    "description": "全局的默认批量发送的消息, 如果具体的消息设置了 models.PushMessage 那么将覆盖掉此项",
+                    "type": "object",
+                    "$ref": "#/definitions/models.PushMessage"
+                },
+                "message_items": {
+                    "description": "批量发送的消息列表",
+                    "type": "array",
+                    "items": {
+                        "$ref": "#/definitions/handler.PushMessageReqItem"
+                    }
+                }
+            }
+        },
+        "handler.BatchPushMessageRespItem": {
+            "type": "object",
+            "properties": {
+                "app_id": {
+                    "description": "app id",
+                    "type": "string"
+                },
+                "error": {
+                    "description": "错误",
+                    "type": "error"
+                },
+                "message": {
+                    "description": "推送消息",
+                    "type": "object",
+                    "$ref": "#/definitions/models.PushMessage"
+                },
+                "platform_resp": {
+                    "description": "第三方平台的响应",
+                    "type": "object"
+                },
+                "push_status": {
+                    "description": "0 为 failed 1 为 succeed",
+                    "type": "integer"
+                },
+                "reason": {
+                    "description": "失败的原因",
+                    "type": "string"
+                },
+                "token": {
+                    "description": "设备 token",
+                    "type": "string"
+                },
+                "user_id": {
+                    "description": "用户 id",
+                    "type": "string"
+                }
+            }
+        },
+        "handler.PushMessageReqItem": {
+            "type": "object",
+            "properties": {
+                "app_id": {
+                    "description": "app id",
+                    "type": "string"
+                },
+                "message": {
+                    "description": "推送消息",
+                    "type": "object",
+                    "$ref": "#/definitions/models.PushMessage"
+                },
+                "token": {
+                    "description": "设备 token",
+                    "type": "string"
+                },
+                "user_id": {
+                    "description": "用户 id",
+                    "type": "string"
+                }
+            }
+        },
+        "handler.PushMessageResp": {
+            "type": "object",
+            "properties": {
+                "error": {
+                    "description": "假如请求失败, 返回的错误",
+                    "type": "error"
+                },
+                "platform_resp": {
+                    "description": "请求第三方平台发送推送消息,第三方平台返回的响应结果",
+                    "type": "object"
+                },
+                "push_result": {
+                    "description": "发布推送通知的响应信息",
+                    "type": "string"
+                },
+                "push_status": {
+                    "description": "0 为 failed 1 为 succeed",
+                    "type": "integer"
+                },
+                "token": {
+                    "description": "设备 token",
+                    "type": "string"
+                },
+                "user_id": {
+                    "description": "用户 id",
+                    "type": "string"
+                }
+            }
+        },
+        "models.PushMessage": {
+            "type": "object",
+            "properties": {
+                "body": {
+                    "description": "内容",
+                    "type": "string"
+                },
+                "title": {
+                    "description": "标题",
+                    "type": "string"
+                },
+                "type": {
+                    "description": "客户端处理通知类型 1为 firebase 2为 Apple",
+                    "type": "integer"
+                }
+            }
+        }
+    }
+}

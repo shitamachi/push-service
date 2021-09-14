@@ -24,7 +24,7 @@ func InitDB() (*ent.Client, error) {
 	db.SetMaxOpenConns(100)
 	db.SetConnMaxLifetime(time.Hour)
 
-	client := ent.NewClient(ent.Driver(driver))
+	client := ent.NewClient(ent.Driver(driver), ent.Debug())
 	if client == nil {
 		return nil, fmt.Errorf("got client but is nil")
 	}

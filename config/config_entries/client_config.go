@@ -1,6 +1,6 @@
 package config_entries
 
-type PushType = string
+type PushType string
 
 const (
 	ApplePush    PushType = "apple"

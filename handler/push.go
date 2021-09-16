@@ -453,7 +453,7 @@ func PushMessageForAllSpecificClient(c *api.Context) api.ResponseOptions {
 	var req = new(PushMessageForAllSpecificClientReq)
 	body, err := c.GetBody()
 	if err != nil {
-		log.Logger.Error("PushMessageForAllSpecificClient: failed to get body")
+		log.Logger.Error("PushMessageForAllSpecificClient: failed to get body", zap.Error(err), zap.ByteString("body", body))
 		return api.ErrorWithOpts(http.StatusInternalServerError)
 	}
 

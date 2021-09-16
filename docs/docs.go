@@ -35,7 +35,7 @@ var doc = `{
     "paths": {
         "/v1/batch_push_messages": {
             "post": {
-                "description": "批量推送消息; 如果请求体中设置了 global_message, 那么所有消息列表中的推送消息将为 global_message, 如果具体消息里单独设置了 message 那么将会覆盖掉 global_message",
+                "description": "给客户端所有用户发送push消息; 不支持每个消息单独设置",
                 "consumes": [
                     "application/json"
                 ],
@@ -45,16 +45,16 @@ var doc = `{
                 "tags": [
                     "push"
                 ],
-                "summary": "批量推送消息",
-                "operationId": "batch-push-messages",
+                "summary": "给客户端所有用户发送push消息",
+                "operationId": "push-messages-for-all-users",
                 "parameters": [
                     {
-                        "description": "messages",
+                        "description": "请求体",
                         "name": "message",
                         "in": "body",
                         "required": true,
                         "schema": {
-                            "$ref": "#/definitions/handler.BatchPushMessageReq"
+                            "$ref": "#/definitions/handler.PushMessageForAllSpecificClientReq"
                         }
                     }
                 ],
@@ -70,10 +70,7 @@ var doc = `{
                                     "type": "object",
                                     "properties": {
                                         "data": {
-                                            "type": "array",
-                                            "items": {
-                                                "$ref": "#/definitions/handler.BatchPushMessageRespItem"
-                                            }
+                                            "$ref": "#/definitions/handler.PushMessageForAllSpecificClientResp"
                                         }
                                     }
                                 }
@@ -241,6 +238,40 @@ var doc = `{
                 }
             }
         },
+        "handler.PushMessageForAllSpecificClientReq": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "description": "本次全体推送动作的唯一 id, 用于区分每次全体推送",
+                    "type": "string"
+                },
+                "app_ids": {
+                    "description": "待发送的客户端 app id",
+                    "type": "array",
+                    "items": {
+                        "type": "string"
+                    }
+                },
+                "message": {
+                    "description": "推送消息",
+                    "type": "object",
+                    "$ref": "#/definitions/models.PushMessage"
+                }
+            }
+        },
+        "handler.PushMessageForAllSpecificClientResp": {
+            "type": "object",
+            "properties": {
+                "action_id": {
+                    "description": "本次推送的唯一标识符",
+                    "type": "string"
+                },
+                "status": {
+                    "description": "推送状态 1为成功",
+                    "type": "integer"
+                }
+            }
+        },
         "handler.PushMessageReqItem": {
             "type": "object",
             "properties": {
@@ -299,13 +330,16 @@ var doc = `{
                     "description": "内容",
                     "type": "string"
                 },
+                "data": {
+                    "description": "客户端处理通知类型\ntype: 0 无任何动作 1 打开书籍详情 2 打开一个特定的网页 3 打开新手礼包页面 4 打开奖励任务页面\nbookId: 打开书籍详情所跳转的书籍 book id\nlink: 打开网页所跳转的网页URL",
+                    "type": "object",
+                    "additionalProperties": {
+                        "type": "string"
+                    }
+                },
                 "title": {
                     "description": "标题",
                     "type": "string"
-                },
-                "type": {
-                    "description": "客户端处理通知类型 1为 firebase 2为 Apple",
-                    "type": "integer"
                 }
             }
         }

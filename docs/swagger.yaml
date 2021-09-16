@@ -55,6 +55,30 @@ definitions:
         description: 用户 id
         type: string
     type: object
+  handler.PushMessageForAllSpecificClientReq:
+    properties:
+      action_id:
+        description: 本次全体推送动作的唯一 id, 用于区分每次全体推送
+        type: string
+      app_ids:
+        description: 待发送的客户端 app id
+        items:
+          type: string
+        type: array
+      message:
+        $ref: '#/definitions/models.PushMessage'
+        description: 推送消息
+        type: object
+    type: object
+  handler.PushMessageForAllSpecificClientResp:
+    properties:
+      action_id:
+        description: 本次推送的唯一标识符
+        type: string
+      status:
+        description: 推送状态 1为成功
+        type: integer
+    type: object
   handler.PushMessageReqItem:
     properties:
       app_id:
@@ -97,12 +121,18 @@ definitions:
       body:
         description: 内容
         type: string
+      data:
+        additionalProperties:
+          type: string
+        description: |-
+          客户端处理通知类型
+          type: 0 无任何动作 1 打开书籍详情 2 打开一个特定的网页 3 打开新手礼包页面 4 打开奖励任务页面
+          bookId: 打开书籍详情所跳转的书籍 book id
+          link: 打开网页所跳转的网页URL
+        type: object
       title:
         description: 标题
         type: string
-      type:
-        description: 客户端处理通知类型 1为 firebase 2为 Apple
-        type: integer
     type: object
 host: petstore.swagger.io
 info:
@@ -122,16 +152,15 @@ paths:
     post:
       consumes:
       - application/json
-      description: 批量推送消息; 如果请求体中设置了 global_message, 那么所有消息列表中的推送消息将为 global_message,
-        如果具体消息里单独设置了 message 那么将会覆盖掉 global_message
-      operationId: batch-push-messages
+      description: 给客户端所有用户发送push消息; 不支持每个消息单独设置
+      operationId: push-messages-for-all-users
       parameters:
-      - description: messages
+      - description: 请求体
         in: body
         name: message
         required: true
         schema:
-          $ref: '#/definitions/handler.BatchPushMessageReq'
+          $ref: '#/definitions/handler.PushMessageForAllSpecificClientReq'
       produces:
       - application/json
       responses:
@@ -142,9 +171,7 @@ paths:
             - $ref: '#/definitions/api.ResponseEntry'
             - properties:
                 data:
-                  items:
-                    $ref: '#/definitions/handler.BatchPushMessageRespItem'
-                  type: array
+                  $ref: '#/definitions/handler.PushMessageForAllSpecificClientResp'
               type: object
         "400":
           description: 参数错误
@@ -154,7 +181,7 @@ paths:
           description: 内部错误
           schema:
             $ref: '#/definitions/api.ResponseEntry'
-      summary: 批量推送消息
+      summary: 给客户端所有用户发送push消息
       tags:
       - push
   /v1/push_messages:

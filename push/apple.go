@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/log"
+	"github.com/shitamachi/push-service/models"
 	"github.com/sideshow/apns2"
 	"github.com/sideshow/apns2/token"
 	"go.uber.org/zap"
@@ -85,8 +86,8 @@ func (a *ApplePushClient) GetClientByAppID(appID string) (interface{}, bool) {
 	return value, true
 }
 
-func (a *ApplePushClient) Push(ctx context.Context, appId, message, token string, data map[string]string) (interface{}, error) {
-	v, ok := a.GetClientByAppID(appId)
+func (a *ApplePushClient) Push(ctx context.Context, message *models.PushMessage) (interface{}, error) {
+	v, ok := a.GetClientByAppID(message.GetAppId())
 	if !ok || v == nil {
 		log.Logger.Error("ApplePush: can not get push client, value is nil or get operation not ok")
 		return nil, errors.New("can not get client")
@@ -98,12 +99,12 @@ func (a *ApplePushClient) Push(ctx context.Context, appId, message, token string
 		return nil, errors.New("can not convert client value to *apns2.Client")
 	}
 
-	rep, err := client.Push(&apns2.Notification{
-		DeviceToken: token,
-		Topic:       appId,
-		//example: {"aps":{"alert":"Hello!"}}
-		Payload: []byte(message),
-	})
+	notification, ok := message.Build().(*apns2.Notification)
+	if !ok {
+		log.Logger.Error("ApplePush: got message ok, but convert to *apns2.Notification failed",
+			zap.String("type", reflect.TypeOf(notification).String()))
+	}
+	rep, err := client.PushWithContext(ctx, notification)
 
 	switch {
 	case err != nil:

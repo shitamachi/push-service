@@ -15,6 +15,7 @@ import (
 	"github.com/shitamachi/push-service/models"
 	"github.com/shitamachi/push-service/push"
 	"github.com/shitamachi/push-service/service"
+	"github.com/shitamachi/push-service/utils"
 	"github.com/sideshow/apns2"
 	"go.uber.org/zap"
 	"net/http"
@@ -74,6 +75,22 @@ type PushMessageResp struct {
 	PlatformResp interface{} `json:"platform_resp,omitempty"`
 	// 假如请求失败, 返回的错误
 	Error error `json:"error,omitempty"`
+}
+
+type PushMessageForAllSpecificClientReq struct {
+	// 本次全体推送动作的唯一 id, 用于区分每次全体推送
+	ActionId string `json:"action_id"`
+	// 推送消息
+	Message *models.PushMessage `json:"message,omitempty"`
+	// 待发送的客户端 app id
+	AppIds []string `json:"app_ids"`
+}
+
+type PushMessageForAllSpecificClientResp struct {
+	// 推送状态 1为成功
+	Status int `json:"status"`
+	// 本次推送的唯一标识符
+	ActionId string `json:"action_id"`
 }
 
 // PushMessage godoc
@@ -238,10 +255,8 @@ func PushMessage(c *api.Context) api.ResponseOptions {
 			res, err := client.SendAll(c.Req.Context(), []*messaging.Message{
 				{
 					Notification: req.Message.ConvertToPushPayload(req.AppId).(*messaging.Notification),
-					Data: map[string]string{
-						"type": req.Message.Type.String(),
-					},
-					Token: token.Token,
+					Data:         req.Message.Data,
+					Token:        token.Token,
 				},
 			})
 			respItem.PushStatus = 0
@@ -361,21 +376,13 @@ func BatchPushMessage(c *api.Context) api.ResponseOptions {
 
 			switch item.PushType {
 			case "apple":
-				var message string
+				var message *models.PushMessage
 				if isSetGlobalMessage {
-					req.GlobalMessage.SetAppId(token.AppID)
-					message, err = req.GlobalMessage.String()
-					if err != nil {
-						log.Logger.Error("BatchPushMessage: convert GlobalMessage to string failed", zap.Error(err))
-						respItem.Reason = "BatchPushMessage: convert GlobalMessage to string failed"
-						respItem.Error = err
-						continue
-					}
+					message = req.GlobalMessage.SetAppId(token.AppID).SetToken(token.Token)
 				} else {
-					message, _ = reqItem.Message.String()
+					message = reqItem.Message.SetAppId(token.AppID).SetToken(token.Token)
 				}
-				rep, err := push.GlobalApplePushClient.
-					Push(ctx, token.AppID, message, token.Token, nil)
+				rep, err := push.GlobalApplePushClient.Push(ctx, message)
 
 				response, ok := rep.(*apns2.Response)
 				if !ok {
@@ -394,20 +401,13 @@ func BatchPushMessage(c *api.Context) api.ResponseOptions {
 				respItem.PlatformResp = rep
 
 			case "firebase":
-				var message string
+				var message *models.PushMessage
 				if isSetGlobalMessage {
-					req.GlobalMessage.SetAppId(token.AppID)
-					message, err = req.GlobalMessage.String()
-					if err != nil {
-						log.Logger.Error("BatchPushMessage: convert GlobalMessage to string failed", zap.Error(err))
-						respItem.Reason = "BatchPushMessage: convert GlobalMessage to string failed"
-						respItem.Error = err
-						continue
-					}
+					message = req.GlobalMessage.SetAppId(token.AppID).SetToken(token.Token)
 				} else {
-					message, _ = reqItem.Message.String()
+					message = reqItem.Message.SetAppId(token.AppID).SetToken(token.Token)
 				}
-				rep, err := push.GlobalFirebasePushClient.Push(ctx, token.AppID, message, token.Token, nil)
+				rep, err := push.GlobalFirebasePushClient.Push(ctx, message)
 
 				batchResponse, ok := rep.(*messaging.BatchResponse)
 				if !ok {
@@ -435,6 +435,62 @@ func BatchPushMessage(c *api.Context) api.ResponseOptions {
 	}
 
 	return api.Ok(respItems)
+}
+
+// PushMessageForAllSpecificClient godoc
+// @Summary 给客户端所有用户发送push消息
+// @Description 给客户端所有用户发送push消息; 不支持每个消息单独设置
+// @ID push-messages-for-all-users
+// @Tags push
+// @Accept  json
+// @Produce  json
+// @Param message body PushMessageForAllSpecificClientReq true "请求体"
+// @Success 200 {object} api.ResponseEntry{data=PushMessageForAllSpecificClientResp} "ok"
+// @Failure 400 {object} api.ResponseEntry "参数错误"
+// @Failure 500 {object} api.ResponseEntry "内部错误"
+// @Router /v1/batch_push_messages [post]
+func PushMessageForAllSpecificClient(c *api.Context) api.ResponseOptions {
+	var req = new(PushMessageForAllSpecificClientReq)
+	body, err := c.GetBody()
+	if err != nil {
+		log.Logger.Error("PushMessageForAllSpecificClient: failed to get body")
+		return api.ErrorWithOpts(http.StatusInternalServerError)
+	}
+
+	err = json.Unmarshal(body, &req)
+	if err != nil {
+		log.Logger.Error("PushMessageForAllSpecificClient: failed to unmarshal request body")
+		return api.ErrorWithOpts(http.StatusBadRequest, api.Message("failed to unmarshal request body"))
+	}
+
+	platformTokens, _ := db.Client.UserPlatformTokens.
+		Query().
+		Where(userplatformtokens.AppIDIn(req.AppIds...)).
+		All(context.Background())
+
+	for _, token := range platformTokens {
+		msg := req.Message.Clone().SetToken(token.Token).SetAppId(token.AppID)
+		streamValues := msg.ToRedisStreamValues(map[string]interface{}{
+			"app_id":    token.AppID,
+			"token":     token.Token,
+			"user_id":   token.UserID,
+			"action_id": req.ActionId,
+		})
+		//marshal, _ := json.Marshal(streamValues)
+		//println(marshal)
+		err := service.AddMessageToStream(
+			context.Background(),
+			service.PushMessageStreamKey,
+			streamValues,
+		)
+		if err != nil {
+			log.Logger.Error("PushMessageForAllSpecificClient: add message to stream failed", zap.Error(err))
+			return api.Error(http.StatusInternalServerError, "failed to add push message to queue")
+		}
+		log.Logger.Info("PushMessageForAllSpecificClient: add message to stream successfully")
+	}
+
+	return api.Ok(PushMessageForAllSpecificClientResp{Status: 1})
 }
 
 func BatchPushMessageInQueue(c *api.Context) api.ResponseOptions {
@@ -500,12 +556,15 @@ func BatchPushMessageInQueue(c *api.Context) api.ResponseOptions {
 			}
 
 			for _, token := range tokens {
-				err := service.AddMessageToStream(ctx, service.PushMessageStreamKey, map[string]interface{}{
-					"message": reqItem.Message,
-					"app_id":  token.AppID,
-					"token":   token.Token,
-					"user_id": token.UserID,
-				})
+				err := service.AddMessageToStream(
+					ctx,
+					service.PushMessageStreamKey,
+					utils.MergeMap(reqItem.Message.SetAppId(token.AppID).SetToken(token.Token).ToMap(), map[string]interface{}{
+						"app_id":  token.AppID,
+						"token":   token.Token,
+						"user_id": token.UserID,
+					}),
+				)
 				if err != nil {
 					log.Logger.Error("BatchPushMessageInQueue: add message to stream failed", zap.Error(err))
 					continue

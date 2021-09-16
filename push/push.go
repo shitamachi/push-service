@@ -1,9 +1,11 @@
 package push
 
-import "context"
+import (
+	"context"
+	"github.com/shitamachi/push-service/models"
+)
 
 type Pusher interface {
 	GetClientByAppID(appId string) (interface{}, bool)
-	Push(ctx context.Context, appId, message, token string, data map[string]string) (interface{}, error)
-	//GetClientAndPush(ctx context.Context, appId, message, token string, data map[string]string) error
+	Push(ctx context.Context, message *models.PushMessage) (interface{}, error)
 }

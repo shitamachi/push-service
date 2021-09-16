@@ -64,7 +64,7 @@ func main() {
 	r := gin.New()
 	r.POST("/v1/push_messages", api.WrapperGinHandleFunc(handler.PushMessage))
 	r.POST("/v1/batch_push_messages", api.WrapperGinHandleFunc(handler.BatchPushMessage))
-
+	r.POST("/v1/push_messages_for_all", api.WrapperGinHandleFunc(handler.PushMessageForAllSpecificClient))
 	//todo
 	//api.HandleFunc("/v1/set_token", handler.SetUserPushToken)
 	//api.HandleFunc("/v1/batch_push_messages_async", handler.BatchPushMessageInQueue)

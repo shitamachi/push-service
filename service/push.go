@@ -10,9 +10,11 @@ import (
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/config/config_entries"
 	"github.com/shitamachi/push-service/log"
+	"github.com/shitamachi/push-service/models"
 	"github.com/shitamachi/push-service/mq"
 	"github.com/shitamachi/push-service/push"
 	"go.uber.org/zap"
+	"reflect"
 	"sync"
 	"time"
 )
@@ -36,13 +38,18 @@ func InitSendPushQueue(ctx context.Context) {
 		// create consumer
 		for i := 0; i < 5; i++ {
 			go func(i int) {
-				CreateConsumer(ctx, fmt.Sprintf("push_message_consumer_%d_%d", config.GlobalConfig.WorkerID, i), processPushMessage)
+				CreateConsumer(
+					ctx,
+					fmt.Sprintf("push_message_consumer_%d_%d", config.GlobalConfig.WorkerID, i),
+					processPushMessage,
+					recordPushMessageStatus,
+				)
 			}(i)
 		}
 
 		// handle pending message
 		go func() {
-			for t := range time.Tick(1 * time.Minute) {
+			for t := range time.Tick(30 * time.Second) {
 				log.Logger.Debug("ClaimPendingMessage: run claim pending message task", zap.Time("t", t))
 				err := mq.ClaimPendingMessage(ctx, PushMessageStreamKey, PushMessageGroupKey)
 				if err != nil {
@@ -55,10 +62,11 @@ func InitSendPushQueue(ctx context.Context) {
 }
 
 type PushStreamMessage struct {
-	Message string `json:"message" mapstructure:"message"`
-	AppId   string `json:"app_id" mapstructure:"app_id"`
-	Token   string `json:"token" mapstructure:"token"`
-	UserId  string `json:"user_id" mapstructure:"user_id"`
+	models.BaseMessage `mapstructure:",squash"`
+	AppId              string `json:"app_id" mapstructure:"app_id"`
+	Token              string `json:"token" mapstructure:"token"`
+	UserId             string `json:"user_id" mapstructure:"user_id"`
+	ActionId           string `json:"action_id" mapstructure:"action_id"`
 }
 
 func CreateMQGroup(ctx context.Context) error {
@@ -97,7 +105,7 @@ func CreateMQGroup(ctx context.Context) error {
 	return nil
 }
 
-func AddMessageToStream(ctx context.Context, stream string, values map[string]interface{}) error {
+func AddMessageToStream(ctx context.Context, stream string, values interface{}) error {
 	result, err := cache.Client.XAdd(ctx, &redis.XAddArgs{
 		Stream: stream,
 		ID:     "*",
@@ -119,7 +127,11 @@ func AddMessageToStream(ctx context.Context, stream string, values map[string]in
 	return nil
 }
 
-func CreateConsumer(ctx context.Context, consumerName string, processFunc func(context.Context, *redis.XMessage) error) {
+func CreateConsumer(ctx context.Context,
+	consumerName string,
+	processFunc func(context.Context, *redis.XMessage) error,
+	pushStatusRecord func(ctx2 context.Context, actionId string, status string),
+) {
 
 	var (
 		lastId       = "0-0"
@@ -161,41 +173,57 @@ func CreateConsumer(ctx context.Context, consumerName string, processFunc func(c
 		}
 
 		for _, stream := range streams {
+			var actionId string
 			for _, message := range stream.Messages {
-				err = processFunc(ctx, &message)
-
-				count, outAckErr := cache.Client.XAck(ctx, PushMessageStreamKey, PushMessageGroupKey, message.ID).Result()
-				if outAckErr != nil {
-					log.Logger.Error("ack message failed",
-						zap.String("consumer_name", consumerName),
-						zap.Error(outAckErr),
-						zap.String("message_id", message.ID))
+				actionId, ok := message.Values["action_id"].(string)
+				if !ok {
+					log.Logger.Error("CreateConsumer: get action id failed",
+						zap.String("type", reflect.TypeOf(actionId).String()))
 					continue
 				}
+				go pushStatusRecord(ctx, actionId, "receive")
+
+				err = processFunc(ctx, &message)
 
 				if err != nil {
-					go RecordPushMessageStatus(0)
-					log.Logger.Error("consumer streams failed",
+					go pushStatusRecord(ctx, actionId, "fail")
+					log.Logger.Error("CreateConsumer: consumer streams failed",
 						zap.Error(err),
+						zap.String("action_id", actionId),
 						zap.String("consumer_name", consumerName),
-						zap.String("message_id", message.ID))
+						zap.String("message_id", message.ID),
+					)
 					continue
 				} else {
-					go RecordPushMessageStatus(1)
-					log.Logger.Info("consumer message successfully",
+					go pushStatusRecord(ctx, actionId, "success")
+
+					count, outAckErr := cache.Client.XAck(ctx, PushMessageStreamKey, PushMessageGroupKey, message.ID).Result()
+					if outAckErr != nil {
+						log.Logger.Error("CreateConsumer: ack message failed",
+							zap.String("action_id", actionId),
+							zap.String("consumer_name", consumerName),
+							zap.Error(outAckErr),
+							zap.String("message_id", message.ID))
+						continue
+					}
+
+					log.Logger.Info("CreateConsumer: consumer message successfully",
+						zap.String("action_id", actionId),
 						zap.String("consumer_name", consumerName),
 						zap.Int64("ack_count", count),
 						zap.String("message_id", message.ID),
 					)
 				}
 			}
+			setRecordPushMessageStatusKeyExpireTime(ctx, actionId)
 		}
 	}
 }
 
 func processPushMessage(ctx context.Context, message *redis.XMessage) error {
-	var psm PushStreamMessage
-	err := mapstructure.Decode(message.Values, &psm)
+	var psm = new(PushStreamMessage)
+	err := mapstructure.Decode(message.Values, psm)
+	psm.Data = psm.BaseMessage.DecodeData()
 	if err != nil {
 		log.Logger.Error("processPushMessage: can not decode map to struct")
 		return fmt.Errorf("processPushMessage: can not decode map to struct")
@@ -209,9 +237,9 @@ func processPushMessage(ctx context.Context, message *redis.XMessage) error {
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	_, err = client.Push(ctx, psm.AppId, psm.Message, psm.Token, nil)
+	_, err = client.Push(ctx, models.NewPushMessage(psm.AppId, psm.Token).SetBaseMessage(psm.BaseMessage))
 	if err != nil {
-		log.Logger.Error("processPushMessage: send push failed", zap.Error(err))
+		log.Logger.Error("processPushMessage: push notification failed", zap.Error(err))
 		return err
 	}
 	return nil
@@ -241,20 +269,19 @@ func getProcessPushMessageClient(appID string) push.Pusher {
 	}
 }
 
-func RecordPushMessageStatus(status int) {
-	key := fmt.Sprintf("push_status_%s", time.Now().Format("2006_01_02"))
-	switch status {
-	case 0:
-		cache.Client.ZIncr(context.Background(), key, &redis.Z{
-			Score:  1,
-			Member: "fail",
-		})
-	case 1:
-		cache.Client.ZIncr(context.Background(), key, &redis.Z{
-			Score:  1,
-			Member: "success",
-		})
-	default:
-		log.Logger.Error("RecordPushMessageStatus: wrong status value")
-	}
+// todo not set ExpireTime
+func recordPushMessageStatus(ctx context.Context, actionId string, status string) {
+	cache.Client.ZIncr(ctx, getRecordPushMessageStatusKey(actionId), &redis.Z{
+		Score:  1,
+		Member: status,
+	})
+}
+
+func getRecordPushMessageStatusKey(actionId string) string {
+	return fmt.Sprintf("push_status_%s", actionId)
+}
+
+func setRecordPushMessageStatusKeyExpireTime(ctx context.Context, actionId string) {
+	key := getRecordPushMessageStatusKey(actionId)
+	cache.Client.Expire(ctx, key, time.Hour*24*7)
 }

@@ -16,9 +16,9 @@ func GetPendingMessages(ctx context.Context, stream, group string) ([]redis.XPen
 	pendingList, err := cache.Client.XPendingExt(ctx, &redis.XPendingExtArgs{
 		Stream: stream,
 		Group:  group,
-		Idle:   18000 * time.Second, //todo 硬编码
 		Start:  "-",
 		End:    "+",
+		Count:  10,
 	}).Result()
 	if err != nil {
 		log.Logger.Error("GetPendingMessages: get pending list failed", zap.String("stream", stream), zap.String("group", group))
@@ -86,22 +86,26 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 		if err = claimPendingMessage(); err != nil {
 			err := backoff.RetryNotify(
 				claimPendingMessage,
-				backoff.WithMaxRetries(backoff.NewExponentialBackOff(), 5),
+				backoff.WithMaxRetries(backoff.NewExponentialBackOff(), 3),
 				func(err error, duration time.Duration) {
 					log.Logger.Error("ClaimPendingMessage: claim message failed", zap.Error(err), zap.Duration("delay_duration", duration))
 				},
 			)
 			if err != nil {
 				log.Logger.Error("ClaimPendingMessage: backoff retry claim pending message failed, try to del it", zap.Error(err))
-				_, err := cache.Client.XDel(ctx, stream, message.ID).Result()
-				if err != nil {
-					log.Logger.Error("ClaimPendingMessage: maximum number of retries to claim message, try del it failed",
-						zap.Error(err),
-						zap.Any("message_info", message),
-					)
-					return err
-				}
+
 				//return err
+			}
+		}
+		if message.RetryCount > 10 {
+			res, err := cache.Client.XAck(ctx, stream, group, message.ID).Result()
+			log.Logger.Debug("ClaimPendingMessage: xack info ", zap.Any("xack_info", res))
+			if err != nil {
+				log.Logger.Error("ClaimPendingMessage: maximum number of retries to claim message, try ack it failed",
+					zap.Error(err),
+					zap.Any("message_info", message),
+				)
+				return err
 			}
 		}
 	}

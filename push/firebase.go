@@ -6,9 +6,9 @@ import (
 	firebase "firebase.google.com/go/v4"
 	"firebase.google.com/go/v4/messaging"
 	"fmt"
-	jsoniter "github.com/json-iterator/go"
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/log"
+	"github.com/shitamachi/push-service/models"
 	"go.uber.org/zap"
 	"google.golang.org/api/option"
 	"reflect"
@@ -73,41 +73,31 @@ func (f *FirebasePushClient) GetClientByAppID(appID string) (interface{}, bool) 
 	return value, true
 }
 
-func (f *FirebasePushClient) Push(ctx context.Context, appId, message, token string, data map[string]string) (interface{}, error) {
-	reqMessage := MessageFirebaseItem{}
-	err := jsoniter.Unmarshal([]byte(message), &reqMessage)
-	if err != nil {
-		log.Logger.Error("Firebase Push: can not unmarshal the request message",
-			zap.Any("message", message),
-			zap.Error(err),
-		)
-		return nil, err
+func (f *FirebasePushClient) Push(ctx context.Context, message *models.PushMessage) (interface{}, error) {
+	if message == nil {
+		log.Logger.Error("Firebase Push: get param message is nil")
+		return nil, errors.New("message is nil")
 	}
-
 	// get push message client
-	value, ok := f.GetClientByAppID(appId)
+	value, ok := f.GetClientByAppID(message.GetAppId())
 	if !ok || value == nil {
 		log.Logger.Error("Firebase Push: can not get push client, value is nil or get operation not ok")
 		return nil, errors.New("can not get client")
 	}
 	client, ok := value.(*messaging.Client)
 	if !ok {
-		log.Logger.Error("Push: got firebase client value from global instance, but convert to *messaging.Client failed",
+		log.Logger.Error("Firebase Push: got firebase client value from global instance, but convert to *messaging.Client failed",
 			zap.String("type", reflect.TypeOf(client).String()))
 		return nil, errors.New("can not convert client value to *messaging.Client")
 	}
 
-	res, err := client.SendAll(ctx, []*messaging.Message{
-		{
-			Notification: &messaging.Notification{
-				Title:    reqMessage.Title,
-				Body:     reqMessage.Body,
-				ImageURL: reqMessage.ImageURL,
-			},
-			Data:  reqMessage.Data,
-			Token: token,
-		},
-	})
+	msg, ok := message.Build().(*messaging.Message)
+	if !ok {
+		log.Logger.Error("Firebase Push: got message ok, but convert to *messaging.Message failed",
+			zap.String("type", reflect.TypeOf(msg).String()))
+		return nil, errors.New("can not convert message to *messaging.Message")
+	}
+	res, err := client.SendAll(ctx, []*messaging.Message{msg})
 
 	if err != nil {
 		log.Logger.Error("FirebasePush: send push request to firebase failed", zap.Error(err))

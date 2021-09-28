@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"github.com/gin-contrib/pprof"
 	"github.com/gin-gonic/gin"
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/shitamachi/push-service/api"
@@ -72,6 +73,9 @@ func main() {
 	//api.HandleFunc("/health", handler.Health)
 
 	r.GET("/swagger/*any", ginSwagger.WrapHandler(swaggerFiles.Handler))
+
+	//pprof
+	pprof.RouteRegister(r.Group(""))
 
 	log.Sugar.Fatal(r.Run(fmt.Sprintf(":%d", config.GlobalConfig.Port)))
 }

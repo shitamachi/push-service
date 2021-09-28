@@ -48,5 +48,12 @@
       "package_name": "package_name_b",
       "service_account_file_content": "your firebase service account file content"
     }
+  },
+  "loki": {
+    "url": "http://127.0.0.1:3100/loki/api/v1/push",
+    "source": "push-service",
+    "level_name": "severity",
+    "send_level": 0,
+    "labels": {}
   }
 }

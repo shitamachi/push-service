@@ -1,12 +1,16 @@
 package log
 
 import (
+	"github.com/prometheus/common/model"
+	lokizapcore "github.com/shitamachi/loki-client/zapcore"
 	"github.com/shitamachi/push-service/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"gopkg.in/natefinch/lumberjack.v2"
 	"os"
 	"path/filepath"
+	"strconv"
+	"time"
 )
 
 var (
@@ -15,6 +19,28 @@ var (
 )
 
 func InitLogger() {
+	defer func() {
+		lokiCore, err := lokizapcore.NewLokiCore(&lokizapcore.LokiCoreConfig{
+			URL:       config.GlobalConfig.Loki.URL,
+			SendLevel: zapcore.InfoLevel,
+			BatchWait: 3 * time.Second,
+			BatchSize: 10,
+			TenantID:  strconv.Itoa(config.GlobalConfig.WorkerID),
+			ExternalLabels: map[model.LabelName]model.LabelValue{
+				"source":   model.LabelValue(config.GlobalConfig.Loki.Source),
+				"instance": model.LabelValue(strconv.Itoa(config.GlobalConfig.WorkerID)),
+			},
+		})
+		if err != nil {
+			zap.L().Error("InitLogger: init loki core failed", zap.Error(err))
+			return
+		}
+		Logger = Logger.WithOptions(zap.WrapCore(func(core zapcore.Core) zapcore.Core {
+			return zapcore.NewTee(core, lokiCore)
+		}))
+		zap.L().Info("InitLogger: init loki core completed")
+	}()
+
 	switch config.GlobalConfig.Mode {
 	case "debug":
 		logger, err := zap.NewDevelopment()

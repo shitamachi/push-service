@@ -17,6 +17,9 @@ definitions:
     type: object
   handler.BatchPushMessageReq:
     properties:
+      action_id:
+        description: 异步处理推送时使用
+        type: string
       global_message:
         $ref: '#/definitions/models.PushMessage'
         description: 全局的默认批量发送的消息, 如果具体的消息设置了 models.PushMessage 那么将覆盖掉此项
@@ -73,7 +76,7 @@ definitions:
   handler.PushMessageForAllSpecificClientResp:
     properties:
       action_id:
-        description: 本次推送的唯一标识符
+        description: 本次推送的唯一标识符, 如果请求没有传递则会生成一个新的标识符返回
         type: string
       status:
         description: 推送状态 1为成功
@@ -134,7 +137,7 @@ definitions:
         description: 标题
         type: string
     type: object
-host: petstore.swagger.io
+host: localhost
 info:
   contact:
     email: support@swagger.io
@@ -184,6 +187,43 @@ paths:
       summary: 给客户端所有用户发送push消息
       tags:
       - push
+  /v1/batch_push_messages_async:
+    post:
+      consumes:
+      - application/json
+      description: 异步批量推送消息, 推送结果请使用获取推送结果接口查看; 如果请求体中设置了 global_message, 那么所有消息列表中的推送消息将为
+        global_message, 如果具体消息里单独设置了 message 那么将会覆盖掉 global_message
+      operationId: push-messages-for-all-users-async
+      parameters:
+      - description: 请求体
+        in: body
+        name: message
+        required: true
+        schema:
+          $ref: '#/definitions/handler.BatchPushMessageReq'
+      produces:
+      - application/json
+      responses:
+        "200":
+          description: ok
+          schema:
+            allOf:
+            - $ref: '#/definitions/api.ResponseEntry'
+            - properties:
+                data:
+                  $ref: '#/definitions/handler.PushMessageForAllSpecificClientResp'
+              type: object
+        "400":
+          description: 参数错误
+          schema:
+            $ref: '#/definitions/api.ResponseEntry'
+        "500":
+          description: 内部错误
+          schema:
+            $ref: '#/definitions/api.ResponseEntry'
+      summary: 异步批量推送消息
+      tags:
+      - push-async
   /v1/push_messages:
     post:
       consumes:

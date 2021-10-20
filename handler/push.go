@@ -6,6 +6,7 @@ import (
 	"errors"
 	"firebase.google.com/go/v4/messaging"
 	"fmt"
+	"github.com/google/uuid"
 	"github.com/shitamachi/push-service/api"
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/db"
@@ -41,6 +42,8 @@ type BatchPushMessageReq struct {
 	GlobalMessage *models.PushMessage `json:"global_message,omitempty"`
 	// 批量发送的消息列表
 	MessageItems []PushMessageReqItem `json:"message_items"`
+	// 异步处理推送时使用
+	ActionId string `json:"action_id,omitempty"`
 }
 
 type BatchPushMessageRespItem struct {
@@ -89,7 +92,7 @@ type PushMessageForAllSpecificClientReq struct {
 type PushMessageForAllSpecificClientResp struct {
 	// 推送状态 1为成功
 	Status int `json:"status"`
-	// 本次推送的唯一标识符
+	// 本次推送的唯一标识符, 如果请求没有传递则会生成一个新的标识符返回
 	ActionId string `json:"action_id"`
 }
 
@@ -437,6 +440,123 @@ func BatchPushMessage(c *api.Context) api.ResponseOptions {
 	return api.Ok(respItems)
 }
 
+// BatchPushMessageAsync godoc
+// @Summary 异步批量推送消息
+// @Description 异步批量推送消息, 推送结果请使用获取推送结果接口查看; 如果请求体中设置了 global_message, 那么所有消息列表中的推送消息将为 global_message, 如果具体消息里单独设置了 message 那么将会覆盖掉 global_message
+// @ID push-messages-for-all-users-async
+// @Tags push-async
+// @Accept  json
+// @Produce  json
+// @Param message body BatchPushMessageReq true "请求体"
+// @Success 200 {object} api.ResponseEntry{data=handler.PushMessageForAllSpecificClientResp} "ok"
+// @Failure 400 {object} api.ResponseEntry "参数错误"
+// @Failure 500 {object} api.ResponseEntry "内部错误"
+// @Router /v1/batch_push_messages_async [post]
+func BatchPushMessageAsync(c *api.Context) api.ResponseOptions {
+	var req = new(BatchPushMessageReq)
+	var isSetGlobalMessage bool
+
+	body, err := c.GetBody()
+	if err != nil {
+		log.Logger.Error("BatchPushMessageAsync: get request body failed", zap.Error(err))
+		return api.ErrorWithOpts(http.StatusInternalServerError, api.Message("get request body failed"))
+	}
+	err = json.Unmarshal(body, &req)
+	if err != nil {
+		log.Logger.Error("BatchPushMessageAsync: deserialize request body failed", zap.Error(err))
+		return api.ErrorWithOpts(http.StatusInternalServerError, api.Message("deserialize request body failed"))
+	} else {
+		// 如果请求传递了全局信息则为 true
+		isSetGlobalMessage = !(req.GlobalMessage == nil)
+	}
+
+	if len(req.MessageItems) <= 0 {
+		log.Logger.Warn("BatchPushMessageAsync: request push message items list is empty")
+		return api.Error(http.StatusBadRequest, "request push message items list is empty")
+	}
+
+	for _, reqItem := range req.MessageItems {
+		isItemValid := false
+		switch {
+		case len(reqItem.AppId) <= 0:
+		case reqItem.Message == nil:
+			if isSetGlobalMessage {
+				isItemValid = true
+			}
+		case len(reqItem.Token) <= 0:
+			if len(reqItem.UserId) > 0 {
+				isItemValid = true
+			}
+		case len(reqItem.UserId) <= 0:
+			if len(reqItem.Token) > 0 {
+				isItemValid = true
+			}
+		default:
+			isItemValid = true
+		}
+
+		if !isItemValid {
+			log.Logger.Warn("BatchPushMessageAsync: one of the item in request message_items is not a valid value", zap.Any("item", reqItem))
+			continue
+		}
+
+		query := db.Client.UserPlatformTokens.
+			Query()
+		switch {
+		case len(reqItem.UserId) > 0:
+			query.Where(userplatformtokens.UserID(reqItem.UserId))
+		case len(reqItem.Token) > 0:
+			query.Where(userplatformtokens.Token(reqItem.Token))
+		default:
+			log.Logger.Error("BatchPushMessageAsync: unknown query condition")
+		}
+		tokens, err := query.All(c.Req.Context())
+		if err != nil {
+			reason := fmt.Sprintf("BatchPushMessage: failed to get the user's corresponding device token, err: %v", err)
+			log.Logger.Error(reason)
+			continue
+		}
+
+		for _, token := range tokens {
+			var message *models.PushMessage
+			var ctx = context.Background()
+
+			if isSetGlobalMessage {
+				message = req.GlobalMessage.SetAppId(token.AppID).SetToken(token.Token)
+			} else {
+				message = reqItem.Message.SetAppId(token.AppID).SetToken(token.Token)
+			}
+			streamValues := message.ToRedisStreamValues(map[string]interface{}{
+				"app_id":    token.AppID,
+				"token":     token.Token,
+				"user_id":   token.UserID,
+				"action_id": req.ActionId,
+			})
+			err = service.AddMessageToStream(
+				ctx,
+				service.PushMessageStreamKey,
+				streamValues,
+			)
+			if err != nil {
+				log.Logger.Error("BatchPushMessageAsync: add message to stream failed", zap.Error(err))
+				return api.Error(http.StatusInternalServerError, "failed to add push message to queue")
+			}
+			log.Logger.Info("BatchPushMessageAsync: add message to stream successfully")
+		}
+
+	}
+
+	// 如果请求中没有传递 action id 则会生成一个
+	if len(req.ActionId) <= 0 {
+		req.ActionId = uuid.NewString()
+	}
+
+	return api.Ok(PushMessageForAllSpecificClientResp{
+		Status:   1,
+		ActionId: req.ActionId,
+	})
+}
+
 // PushMessageForAllSpecificClient godoc
 // @Summary 给客户端所有用户发送push消息
 // @Description 给客户端所有用户发送push消息; 不支持每个消息单独设置
@@ -476,8 +596,6 @@ func PushMessageForAllSpecificClient(c *api.Context) api.ResponseOptions {
 			"user_id":   token.UserID,
 			"action_id": req.ActionId,
 		})
-		//marshal, _ := json.Marshal(streamValues)
-		//println(marshal)
 		err := service.AddMessageToStream(
 			context.Background(),
 			service.PushMessageStreamKey,

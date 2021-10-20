@@ -49,7 +49,7 @@ func InitSendPushQueue(ctx context.Context) {
 
 		// handle pending message
 		go func() {
-			for t := range time.Tick(30 * time.Second) {
+			for t := range time.Tick(time.Duration(config.GlobalConfig.Mq.RecoverMessageDuration) * time.Millisecond) {
 				log.Logger.Debug("ClaimPendingMessage: run claim pending message task", zap.Time("t", t))
 				err := mq.ClaimPendingMessage(ctx, PushMessageStreamKey, PushMessageGroupKey)
 				if err != nil {
@@ -129,7 +129,7 @@ func AddMessageToStream(ctx context.Context, stream string, values interface{}) 
 
 func CreateConsumer(ctx context.Context,
 	consumerName string,
-	processFunc func(context.Context, *redis.XMessage) error,
+	processFunc func(context.Context, *redis.XMessage) (bool, error),
 	pushStatusRecord func(ctx2 context.Context, actionId string, status string),
 ) {
 
@@ -159,7 +159,7 @@ func CreateConsumer(ctx context.Context,
 			Block:    2000,
 		}).Result()
 		if err != nil {
-			log.Logger.Debug("consumer redis group timeout",
+			log.Logger.Debug("Consumer: consumer redis group timeout",
 				zap.String("consumer_name", consumerName),
 				zap.String("group", PushMessageGroupKey),
 				zap.Error(err))
@@ -177,41 +177,48 @@ func CreateConsumer(ctx context.Context,
 			for _, message := range stream.Messages {
 				actionId, ok := message.Values["action_id"].(string)
 				if !ok {
-					log.Logger.Error("CreateConsumer: get action id failed",
+					log.Logger.Error("Consumer: get action id failed",
 						zap.String("type", reflect.TypeOf(actionId).String()))
 					continue
 				}
 				go pushStatusRecord(ctx, actionId, "receive")
 
-				err = processFunc(ctx, &message)
+				shouldRetry, err := processFunc(ctx, &message)
 
-				if err != nil {
-					go pushStatusRecord(ctx, actionId, "fail")
-					log.Logger.Error("CreateConsumer: consumer streams failed",
+				if err != nil && shouldRetry {
+					log.Logger.Error("Consumer: consumer streams failed",
 						zap.Error(err),
 						zap.String("action_id", actionId),
 						zap.String("consumer_name", consumerName),
 						zap.String("message_id", message.ID),
 					)
 					continue
+				} else if err != nil {
+					go pushStatusRecord(ctx, actionId, "fail")
+					_, err = cache.Client.XDel(ctx, PushMessageStreamKey, message.ID).Result()
+					if err != nil {
+						log.Logger.Error("Consumer: consume message failed, should not retry, del message failed", zap.Error(err))
+						continue
+					}
+					log.Logger.Debug("Consumer: del message successfully", zap.Any("message", message))
 				} else {
 					go pushStatusRecord(ctx, actionId, "success")
 
 					count, outAckErr := cache.Client.XAck(ctx, PushMessageStreamKey, PushMessageGroupKey, message.ID).Result()
 					if outAckErr != nil {
-						log.Logger.Error("CreateConsumer: ack message failed",
+						log.Logger.Error("Consumer: ack message failed",
 							zap.String("action_id", actionId),
 							zap.String("consumer_name", consumerName),
 							zap.Error(outAckErr),
-							zap.String("message_id", message.ID))
+							zap.Any("message", message))
 						continue
 					}
 
-					log.Logger.Info("CreateConsumer: consumer message successfully",
+					log.Logger.Info("Consumer: consumer message successfully",
 						zap.String("action_id", actionId),
 						zap.String("consumer_name", consumerName),
 						zap.Int64("ack_count", count),
-						zap.String("message_id", message.ID),
+						zap.Any("message", message),
 					)
 				}
 			}
@@ -220,29 +227,35 @@ func CreateConsumer(ctx context.Context,
 	}
 }
 
-func processPushMessage(ctx context.Context, message *redis.XMessage) error {
+func processPushMessage(ctx context.Context, message *redis.XMessage) (shouldRetry bool, err error) {
 	var psm = new(PushStreamMessage)
-	err := mapstructure.Decode(message.Values, psm)
+	err = mapstructure.Decode(message.Values, psm)
 	psm.Data = psm.BaseMessage.DecodeData()
 	if err != nil {
 		log.Logger.Error("processPushMessage: can not decode map to struct")
-		return fmt.Errorf("processPushMessage: can not decode map to struct")
+		return false, fmt.Errorf("processPushMessage: can not decode map to struct")
 	}
 	client := getProcessPushMessageClient(psm.AppId)
 	if client == nil {
-		log.Logger.Error("processPushMessage: can not get push message client")
-		return errors.New("can not get push message client")
+		log.Logger.Warn("processPushMessage: can not get push message client")
+		return
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
 	_, err = client.Push(ctx, models.NewPushMessage(psm.AppId, psm.Token).SetBaseMessage(psm.BaseMessage))
-	if err != nil {
+
+	switch {
+	case errors.Is(err, context.DeadlineExceeded):
+		log.Logger.Warn("processPushMessage: send push message timeout")
+		return true, err
+	case err != nil:
 		log.Logger.Error("processPushMessage: push notification failed", zap.Error(err))
-		return err
+		return false, err
 	}
-	return nil
+
+	return false, nil
 }
 
 func getProcessPushMessageClient(appID string) push.Pusher {
@@ -271,6 +284,7 @@ func getProcessPushMessageClient(appID string) push.Pusher {
 
 // todo not set ExpireTime
 func recordPushMessageStatus(ctx context.Context, actionId string, status string) {
+	//todo
 	cache.Client.ZIncr(ctx, getRecordPushMessageStatusKey(actionId), &redis.Z{
 		Score:  1,
 		Member: status,

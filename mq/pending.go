@@ -5,6 +5,7 @@ import (
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-redis/redis/v8"
 	"github.com/shitamachi/push-service/cache"
+	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/log"
 	"go.uber.org/zap"
 	"math/rand"
@@ -59,7 +60,6 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 	}
 	if len(consumers) <= 0 {
 		log.Logger.Warn("ClaimPendingMessage: get active consumer result is empty")
-		//return fmt.Errorf("ClaimPendingMessage: get active consumer result is empty")
 		return nil
 	}
 
@@ -70,7 +70,7 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 				Stream:   stream,
 				Group:    group,
 				Consumer: claimConsumer,
-				MinIdle:  18000 * time.Second,
+				MinIdle:  message.Idle,
 				Messages: []string{message.ID},
 			}).Result()
 			if err != nil {
@@ -92,12 +92,14 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 				},
 			)
 			if err != nil {
-				log.Logger.Error("ClaimPendingMessage: backoff retry claim pending message failed, try to del it", zap.Error(err))
-
-				//return err
+				log.Logger.Error("ClaimPendingMessage: backoff retry claim pending message failed, try to del it",
+					zap.Error(err),
+					zap.Any("message_info", message),
+				)
 			}
 		}
-		if message.RetryCount > 10 {
+
+		if int(message.RetryCount) > config.GlobalConfig.Mq.MaxRetryCount {
 			res, err := cache.Client.XAck(ctx, stream, group, message.ID).Result()
 			log.Logger.Debug("ClaimPendingMessage: xack info ", zap.Any("xack_info", res))
 			if err != nil {

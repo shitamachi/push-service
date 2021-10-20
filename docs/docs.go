@@ -92,6 +92,65 @@ var doc = `{
                 }
             }
         },
+        "/v1/batch_push_messages_async": {
+            "post": {
+                "description": "异步批量推送消息, 推送结果请使用获取推送结果接口查看; 如果请求体中设置了 global_message, 那么所有消息列表中的推送消息将为 global_message, 如果具体消息里单独设置了 message 那么将会覆盖掉 global_message",
+                "consumes": [
+                    "application/json"
+                ],
+                "produces": [
+                    "application/json"
+                ],
+                "tags": [
+                    "push-async"
+                ],
+                "summary": "异步批量推送消息",
+                "operationId": "push-messages-for-all-users-async",
+                "parameters": [
+                    {
+                        "description": "请求体",
+                        "name": "message",
+                        "in": "body",
+                        "required": true,
+                        "schema": {
+                            "$ref": "#/definitions/handler.BatchPushMessageReq"
+                        }
+                    }
+                ],
+                "responses": {
+                    "200": {
+                        "description": "ok",
+                        "schema": {
+                            "allOf": [
+                                {
+                                    "$ref": "#/definitions/api.ResponseEntry"
+                                },
+                                {
+                                    "type": "object",
+                                    "properties": {
+                                        "data": {
+                                            "$ref": "#/definitions/handler.PushMessageForAllSpecificClientResp"
+                                        }
+                                    }
+                                }
+                            ]
+                        }
+                    },
+                    "400": {
+                        "description": "参数错误",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    },
+                    "500": {
+                        "description": "内部错误",
+                        "schema": {
+                            "$ref": "#/definitions/api.ResponseEntry"
+                        }
+                    }
+                }
+            }
+        },
         "/v1/push_messages": {
             "post": {
                 "description": "推送单个消息",
@@ -186,6 +245,10 @@ var doc = `{
         "handler.BatchPushMessageReq": {
             "type": "object",
             "properties": {
+                "action_id": {
+                    "description": "异步处理推送时使用",
+                    "type": "string"
+                },
                 "global_message": {
                     "description": "全局的默认批量发送的消息, 如果具体的消息设置了 models.PushMessage 那么将覆盖掉此项",
                     "type": "object",
@@ -263,7 +326,7 @@ var doc = `{
             "type": "object",
             "properties": {
                 "action_id": {
-                    "description": "本次推送的唯一标识符",
+                    "description": "本次推送的唯一标识符, 如果请求没有传递则会生成一个新的标识符返回",
                     "type": "string"
                 },
                 "status": {
@@ -358,7 +421,7 @@ type swaggerInfo struct {
 // SwaggerInfo holds exported Swagger Info so clients can modify it
 var SwaggerInfo = swaggerInfo{
 	Version:     "1.0",
-	Host:        "petstore.swagger.io",
+	Host:        "localhost",
 	BasePath:    "/v1",
 	Schemes:     []string{},
 	Title:       "Push Service API",

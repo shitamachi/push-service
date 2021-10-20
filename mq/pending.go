@@ -95,6 +95,7 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 			}).Result()
 			if err != nil {
 				log.Logger.Error("ClaimPendingMessage: xclaim message to active consumer failed",
+					zap.Error(err),
 					zap.Any("message_info", message),
 					zap.String("claim_consumer", claimConsumer),
 				)

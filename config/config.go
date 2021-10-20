@@ -17,6 +17,7 @@ type AppConfig struct {
 	ApplePushConfig    config_entries.ApplePushSecretConfig       `json:"apple_push_config"`
 	FirebasePushConfig config_entries.FirebaseConfig              `json:"firebase_push_config"`
 	Loki               config_entries.LokiConfig                  `json:"loki"`
+	Mq                 config_entries.MqConfig                    `json:"mq"`
 }
 
 var GlobalConfig *AppConfig

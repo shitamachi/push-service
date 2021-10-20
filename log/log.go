@@ -2,6 +2,7 @@ package log
 
 import (
 	"github.com/prometheus/common/model"
+	"github.com/shitamachi/loki-client/client"
 	lokizapcore "github.com/shitamachi/loki-client/zapcore"
 	"github.com/shitamachi/push-service/config"
 	"go.uber.org/zap"
@@ -29,6 +30,13 @@ func InitLogger() {
 			ExternalLabels: map[model.LabelName]model.LabelValue{
 				"source":   model.LabelValue(config.GlobalConfig.Loki.Source),
 				"instance": model.LabelValue(strconv.Itoa(config.GlobalConfig.WorkerID)),
+			},
+			BufferedClient: true,
+			BufferedConfig: &client.DqueConfig{
+				QueueDir:         filepath.Join("tmp", "loki_dque"),
+				QueueSegmentSize: 500,
+				QueueSync:        false,
+				QueueName:        string("default_logger"),
 			},
 		})
 		if err != nil {

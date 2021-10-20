@@ -43,6 +43,22 @@ func GetActiveConsumers(ctx context.Context, stream, group string) (consumers []
 	return
 }
 
+func randomActiveConsumer(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
+	var minConsumerPendingMsgCount int64
+	xInfoConsumers, err := cache.Client.XInfoConsumers(ctx, stream, group).Result()
+	if err != nil {
+		log.Logger.Error("randomActiveConsumer: can not execute xinfo xInfoConsumers cmd for get pending msg xInfoConsumers", zap.Error(err))
+		return nil, err
+	}
+	for _, consumer := range xInfoConsumers {
+		if consumer.Pending <= minConsumerPendingMsgCount {
+			consumers = append(consumers, consumer)
+			minConsumerPendingMsgCount = consumer.Pending
+		}
+	}
+	return
+}
+
 func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 	pendingMessages, err := GetPendingMessages(ctx, stream, group)
 	if err != nil {
@@ -60,7 +76,11 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 	}
 	if len(consumers) <= 0 {
 		log.Logger.Warn("ClaimPendingMessage: get active consumer result is empty")
-		return nil
+		consumers, err = randomActiveConsumer(ctx, stream, group)
+		if err != nil {
+			log.Logger.Error("ClaimPendingMessage: get random consumer failed", zap.Error(err))
+			return err
+		}
 	}
 
 	for _, message := range pendingMessages {

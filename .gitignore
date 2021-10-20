@@ -24,7 +24,8 @@ vendor/
 conf/*
 !conf/*.example.json
 
-# default log dir
+# tmp dirs
+tmp/
 tmp_log/
 
 # build output

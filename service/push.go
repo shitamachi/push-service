@@ -177,9 +177,8 @@ func CreateConsumer(ctx context.Context,
 			for _, message := range stream.Messages {
 				actionId, ok := message.Values["action_id"].(string)
 				if !ok {
-					log.Logger.Error("Consumer: get action id failed",
+					log.Logger.Warn("Consumer: get action id failed",
 						zap.String("type", reflect.TypeOf(actionId).String()))
-					continue
 				}
 				go pushStatusRecord(ctx, actionId, "receive")
 

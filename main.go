@@ -61,8 +61,13 @@ func main() {
 	ctx := context.Background()
 	service.InitSendPushQueue(ctx)
 
-	gin.SetMode(gin.DebugMode)
+	if config.GlobalConfig.Mode == "release" {
+		gin.SetMode(gin.ReleaseMode)
+	} else {
+		gin.SetMode(gin.DebugMode)
+	}
 	r := gin.New()
+
 	r.POST("/v1/push_messages", api.WrapperGinHandleFunc(handler.PushMessage))
 	r.POST("/v1/batch_push_messages", api.WrapperGinHandleFunc(handler.BatchPushMessage))
 	r.POST("/v1/batch_push_messages_async", api.WrapperGinHandleFunc(handler.BatchPushMessageAsync))

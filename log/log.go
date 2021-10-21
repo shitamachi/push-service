@@ -23,20 +23,19 @@ func InitLogger() {
 	defer func() {
 		lokiCore, err := lokizapcore.NewLokiCore(&lokizapcore.LokiCoreConfig{
 			URL:       config.GlobalConfig.Loki.URL,
-			SendLevel: zapcore.InfoLevel,
+			SendLevel: zapcore.Level(config.GlobalConfig.Loki.SendLevel),
 			BatchWait: 3 * time.Second,
-			BatchSize: 10,
+			BatchSize: 20,
 			TenantID:  strconv.Itoa(config.GlobalConfig.WorkerID),
-			ExternalLabels: map[model.LabelName]model.LabelValue{
-				"source":   model.LabelValue(config.GlobalConfig.Loki.Source),
-				"instance": model.LabelValue(strconv.Itoa(config.GlobalConfig.WorkerID)),
-			},
+			ExternalLabels: convertMapToLokiLabels(config.GlobalConfig.Loki.Labels, map[string]string{
+				"source": config.GlobalConfig.Loki.Source,
+			}),
 			BufferedClient: true,
 			BufferedConfig: &client.DqueConfig{
-				QueueDir:         filepath.Join("tmp", "loki_dque"),
+				QueueDir:         filepath.Join("tmp", "loki_buffered_local_files"),
 				QueueSegmentSize: 500,
 				QueueSync:        false,
-				QueueName:        string("default_logger"),
+				QueueName:        "default_logger",
 			},
 		})
 		if err != nil {
@@ -127,4 +126,15 @@ func EnsureDirExisted(paths ...string) {
 			}
 		}
 	}
+}
+
+func convertMapToLokiLabels(ms ...map[string]string) map[model.LabelName]model.LabelValue {
+	labels := make(map[model.LabelName]model.LabelValue)
+	for _, m := range ms {
+		for k, v := range m {
+			labels[model.LabelName(k)] = model.LabelValue(v)
+		}
+	}
+
+	return labels
 }

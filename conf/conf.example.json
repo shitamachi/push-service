@@ -54,7 +54,10 @@
     "source": "push-service",
     "level_name": "severity",
     "send_level": 0,
-    "labels": {}
+    "labels": {
+      "instance": "local_01",
+      "env": "dev"
+    }
   },
   "mq": {
     "recover_message_duration": 60000,

@@ -36,7 +36,7 @@ func InitDB() (*ent.Client, error) {
 
 func getDSN() string {
 	conf := config.GlobalConfig.DBConfig
-	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?checkConnLiveness=false&loc=Local&parseTime=true&readTimeout=1s&timeout=3s&writeTimeout=1s",
+	return fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?checkConnLiveness=false&loc=Local&parseTime=true&readTimeout=3s&timeout=3s&writeTimeout=1s",
 		conf.User, conf.Password, conf.Addr, conf.Port, conf.DB,
 	)
 }

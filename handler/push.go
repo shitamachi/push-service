@@ -16,11 +16,11 @@ import (
 	"github.com/shitamachi/push-service/models"
 	"github.com/shitamachi/push-service/push"
 	"github.com/shitamachi/push-service/service"
-	"github.com/shitamachi/push-service/utils"
 	"github.com/sideshow/apns2"
 	"go.uber.org/zap"
 	"net/http"
 	"reflect"
+	"sync"
 	"time"
 )
 
@@ -559,7 +559,7 @@ func BatchPushMessageAsync(c *api.Context) api.ResponseOptions {
 
 // PushMessageForAllSpecificClient godoc
 // @Summary 给客户端所有用户发送push消息
-// @Description 给客户端所有用户发送push消息; 不支持每个消息单独设置
+// @Description 给客户端所有用户发送push消息; 不支持每条推送消息单独设置消息内容标题等信息
 // @ID push-messages-for-all-users
 // @Tags push
 // @Accept  json
@@ -583,10 +583,19 @@ func PushMessageForAllSpecificClient(c *api.Context) api.ResponseOptions {
 		return api.ErrorWithOpts(http.StatusBadRequest, api.Message("failed to unmarshal request body"))
 	}
 
-	platformTokens, _ := db.Client.UserPlatformTokens.
+	ids, err := db.Client.UserPlatformTokens.
 		Query().
 		Where(userplatformtokens.AppIDIn(req.AppIds...)).
-		All(context.Background())
+		IDs(context.Background())
+	if err != nil {
+		log.Logger.Error("PushMessageForAllSpecificClient: failed to get user_platform_token record ids records by app id list",
+			zap.Strings("app_ids", req.AppIds),
+			zap.Error(err),
+		)
+		return api.ErrorWithOpts(http.StatusInternalServerError, api.Message("failed to query db"))
+	}
+
+	platformTokens := batchQueryUserPlatformTokensById(ids)
 
 	for _, token := range platformTokens {
 		msg := req.Message.Clone().SetToken(token.Token).SetAppId(token.AppID)
@@ -611,90 +620,6 @@ func PushMessageForAllSpecificClient(c *api.Context) api.ResponseOptions {
 	return api.Ok(PushMessageForAllSpecificClientResp{Status: 1})
 }
 
-func BatchPushMessageInQueue(c *api.Context) api.ResponseOptions {
-	log.Logger.Info("execute batch push messages")
-
-	var reqItems = make([]PushMessageReqItem, 0)
-	body, err := c.GetBody()
-	if err != nil {
-		return api.ErrorWithOpts(http.StatusInternalServerError)
-	}
-	err = json.Unmarshal(body, &reqItems)
-	if err != nil {
-		return api.ErrorWithOpts(http.StatusInternalServerError, api.Message("can not parse request body"))
-	}
-
-	if len(reqItems) <= 0 {
-		return api.Error(http.StatusBadRequest, "request push item list is zero")
-	}
-
-	respItems := make([]BatchPushMessageRespItem, 0)
-
-	ctx := context.Background()
-
-	for _, reqItem := range reqItems {
-		isItemValid := false
-		switch {
-		case len(reqItem.AppId) <= 0:
-		//case len(reqItem.Message) <= 0:
-		case len(reqItem.Token) <= 0:
-			if len(reqItem.UserId) > 0 {
-				isItemValid = true
-			}
-		case len(reqItem.UserId) <= 0:
-			if len(reqItem.Token) > 0 {
-				isItemValid = true
-			}
-		default:
-			isItemValid = true
-		}
-
-		if !isItemValid {
-			appendInvalidBatchPushMessageRespItem(respItems, reqItem, "one of the PushMessageReqItem field is not a valid value")
-			continue
-		}
-
-		go func(reqItem PushMessageReqItem) {
-			query := db.Client.UserPlatformTokens.
-				Query()
-			switch {
-			case len(reqItem.UserId) > 0:
-				query.Where(userplatformtokens.UserID(reqItem.UserId))
-			case len(reqItem.Token) > 0:
-				query.Where(userplatformtokens.Token(reqItem.Token))
-			default:
-				log.Logger.Error("BatchPushMessageInQueue: unknown query condition")
-			}
-
-			tokens, err := query.All(ctx)
-			if err != nil {
-				reason := fmt.Sprintf("BatchPushMessageInQueue: failed to get userplatformtokens result err: %v", err)
-				log.Logger.Error(reason)
-				appendInvalidBatchPushMessageRespItem(respItems, reqItem, reason)
-			}
-
-			for _, token := range tokens {
-				err := service.AddMessageToStream(
-					ctx,
-					service.PushMessageStreamKey,
-					utils.MergeMap(reqItem.Message.SetAppId(token.AppID).SetToken(token.Token).ToMap(), map[string]interface{}{
-						"app_id":  token.AppID,
-						"token":   token.Token,
-						"user_id": token.UserID,
-					}),
-				)
-				if err != nil {
-					log.Logger.Error("BatchPushMessageInQueue: add message to stream failed", zap.Error(err))
-					continue
-				}
-				log.Logger.Info("BatchPushMessageInQueue: add message to stream successfully")
-			}
-		}(reqItem)
-	}
-
-	return api.Ok(respItems)
-}
-
 func appendInvalidBatchPushMessageRespItem(inValidItem []BatchPushMessageRespItem, item PushMessageReqItem, reason string) {
 	inValidItem = append(inValidItem, BatchPushMessageRespItem{
 		PushMessageReqItem: item,
@@ -702,34 +627,56 @@ func appendInvalidBatchPushMessageRespItem(inValidItem []BatchPushMessageRespIte
 	})
 }
 
-func SetUserPushToken(c *api.Context) api.ResponseOptions {
-	postForm := c.Req.PostForm
-	if len(postForm) <= 0 {
-		return api.Error(http.StatusBadRequest, "request post form is empty")
+func batchQueryUserPlatformTokensById(ids []int) []*ent.UserPlatformTokens {
+	var (
+		wg                 sync.WaitGroup
+		mu                 sync.Mutex
+		userPlatformTokens []*ent.UserPlatformTokens
+		idListLen          = len(ids)
+		signalQueryCount   = 50
+		lastIndex          = 0
+	)
+
+	var handlePlatformTokenQuery = func(ids ...int) {
+		records, err := queryUserPlatformTokenById(&wg, ids...)
+		if err != nil {
+			log.Logger.Error("batchQueryUserPlatformTokensById: failed to query user_platform_token records by id list",
+				zap.Ints("ids", ids),
+				zap.Error(err),
+			)
+		} else {
+			mu.Lock()
+			userPlatformTokens = append(userPlatformTokens, records...)
+			mu.Unlock()
+		}
 	}
 
-	userId := postForm.Get("user_id")
-	if len(userId) <= 0 {
-		return api.Error(http.StatusBadRequest, "can not get user_id")
-	}
-	pushToken := postForm.Get("push_token")
-	if len(pushToken) <= 0 {
-		return api.Error(http.StatusBadRequest, "can not get push_token")
-	}
-	appId := postForm.Get("app_id")
-	if len(pushToken) <= 0 {
-		return api.Error(http.StatusBadRequest, "can not get app_id")
+	for {
+		curIndex := lastIndex + signalQueryCount
+		wg.Add(1)
+		if idListLen >= curIndex {
+			go handlePlatformTokenQuery(ids[lastIndex:curIndex]...)
+			lastIndex = curIndex
+		} else {
+			go handlePlatformTokenQuery(ids[lastIndex:]...)
+			break
+		}
 	}
 
-	save, err := db.Client.UserPushToken.
-		Create().
-		SetUserID(userId).
-		SetToken(pushToken).
-		SetAppID(appId).
-		Save(c.Req.Context())
+	wg.Wait()
+
+	return userPlatformTokens
+}
+
+func queryUserPlatformTokenById(wg *sync.WaitGroup, id ...int) ([]*ent.UserPlatformTokens, error) {
+	defer wg.Done()
+
+	res, err := db.Client.UserPlatformTokens.
+		Query().
+		Where(userplatformtokens.IDIn(id...)).
+		All(context.Background())
 	if err != nil {
-		return api.Error(http.StatusInternalServerError, "can not save user token record")
+		return nil, err
 	}
-
-	return api.Ok(save)
+	return res, nil
 }

@@ -86,7 +86,7 @@ func HandleFunc(pattern string, f func(ctx *Context) []ResponseOption) {
 	})
 }
 
-func WrapperGinHandleFunc(f func(ctx *Context) []ResponseOption) gin.HandlerFunc {
+func WrapperGinHandleFunc(f func(ctx *Context) ResponseOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		responseOptions := f(&Context{
 			Writer: c.Writer,

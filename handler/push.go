@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"entgo.io/ent/dialect/sql"
 	"errors"
 	"firebase.google.com/go/v4/messaging"
 	"fmt"
@@ -583,16 +584,39 @@ func PushMessageForAllSpecificClient(c *api.Context) api.ResponseOptions {
 		return api.ErrorWithOpts(http.StatusBadRequest, api.Message("failed to unmarshal request body"))
 	}
 
-	ids, err := db.Client.UserPlatformTokens.
-		Query().
-		Where(userplatformtokens.AppIDIn(req.AppIds...)).
-		IDs(context.Background())
+	// we need convert []string to []interface{}
+	values := make([]interface{}, len(req.AppIds))
+	for i := range req.AppIds {
+		values[i] = req.AppIds[i]
+	}
+	subQueryIdOrderByUpdateAt :=
+		sql.Select(
+			sql.As(sql.Distinct(userplatformtokens.FieldID), "id"),
+			userplatformtokens.FieldDeviceID,
+			userplatformtokens.FieldUpdatedAt,
+		).
+			From(sql.Table(userplatformtokens.Table)).
+			Where(sql.In(userplatformtokens.FieldAppID, values...)).
+			OrderBy(sql.Desc(userplatformtokens.FieldUpdatedAt)).
+			As("sub_query_id_order_by_update_at")
+
+	ids, err := db.Client.UserPlatformTokens.Query().
+		Where(func(s *sql.Selector) {
+			s.From(subQueryIdOrderByUpdateAt)
+		}).
+		Select(userplatformtokens.FieldID).
+		GroupBy(userplatformtokens.FieldID).
+		Ints(context.Background())
+	if err != nil {
+		return nil
+	}
+
 	if err != nil {
 		log.Logger.Error("PushMessageForAllSpecificClient: failed to get user_platform_token record ids records by app id list",
 			zap.Strings("app_ids", req.AppIds),
 			zap.Error(err),
 		)
-		return api.ErrorWithOpts(http.StatusInternalServerError, api.Message("failed to query db"))
+		return api.ErrorWithOpts(http.StatusInternalServerError, api.Message("failed to firstRecordOrderByUpdateAtGroupByDeviceId db"))
 	}
 
 	platformTokens := batchQueryUserPlatformTokensById(ids)

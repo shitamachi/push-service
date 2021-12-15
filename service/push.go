@@ -284,10 +284,18 @@ func getProcessPushMessageClient(appID string) push.Pusher {
 // todo not set ExpireTime
 func recordPushMessageStatus(ctx context.Context, actionId string, status string) {
 	//todo
-	cache.Client.ZIncr(ctx, getRecordPushMessageStatusKey(actionId), &redis.Z{
-		Score:  1,
-		Member: status,
+	key := getRecordPushMessageStatusKey(actionId)
+
+	cache.Client.ZAddArgs(ctx, getRecordPushMessageStatusKey(actionId), redis.ZAddArgs{
+		Members: []redis.Z{
+			{
+				Score:  1,
+				Member: status,
+			},
+		},
 	})
+	cache.Client.Expire(ctx, key, time.Hour*24*7)
+
 }
 
 func getRecordPushMessageStatusKey(actionId string) string {

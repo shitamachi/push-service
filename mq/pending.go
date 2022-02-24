@@ -60,6 +60,8 @@ func randomActiveConsumer(ctx context.Context, stream, group string) (consumers 
 }
 
 func ClaimPendingMessage(ctx context.Context, stream, group string) error {
+	var consumers []redis.XInfoConsumer
+
 	pendingMessages, err := GetPendingMessages(ctx, stream, group)
 	if err != nil {
 		log.Logger.Error("ClaimPendingMessage: failed to get pending messages", zap.String("stream", stream), zap.String("group", group))
@@ -69,18 +71,12 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 		return nil
 	}
 
-	consumers, err := GetActiveConsumers(ctx, stream, group)
-	if err != nil {
+	if consumers, err := GetActiveConsumers(ctx, stream, group); err != nil {
 		log.Logger.Error("ClaimPendingMessage: failed to get active consumer list", zap.String("stream", stream), zap.String("group", group))
 		return err
-	}
-	if len(consumers) <= 0 {
+	} else if len(consumers) <= 0 {
 		log.Logger.Warn("ClaimPendingMessage: get active consumer result is empty")
-		consumers, err = randomActiveConsumer(ctx, stream, group)
-		if err != nil {
-			log.Logger.Error("ClaimPendingMessage: get random consumer failed", zap.Error(err))
-			return err
-		}
+		return nil
 	}
 
 	for _, message := range pendingMessages {

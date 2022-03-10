@@ -8,7 +8,9 @@ import (
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/log"
 	"go.uber.org/zap"
+	"math"
 	"math/rand"
+	"sort"
 	"time"
 )
 
@@ -28,40 +30,50 @@ func GetPendingMessages(ctx context.Context, stream, group string) ([]redis.XPen
 	return pendingList, nil
 }
 
-// GetActiveConsumers return not pending message consumers
-func GetActiveConsumers(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
-	xInfoConsumers, err := cache.Client.XInfoConsumers(ctx, stream, group).Result()
+// GetLowPressureConsumers return low pressure consumer list
+func GetLowPressureConsumers(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
+	consumers, err = cache.Client.XInfoConsumers(ctx, stream, group).Result()
 	if err != nil {
-		log.Logger.Error("GetActiveConsumers: can not execute xinfo xInfoConsumers cmd for get pending msg xInfoConsumers", zap.Error(err))
+		log.Logger.Error("GetLowPressureConsumers: failed to get consumers",
+			zap.String("stream", stream), zap.String("group", group), zap.Error(err),
+		)
 		return nil, err
 	}
-	for _, consumer := range xInfoConsumers {
-		if consumer.Pending == 0 {
-			consumers = append(consumers, consumer)
-		}
+
+	if len(consumers) <= 0 {
+		log.Logger.Warn("GetLowPressureConsumers: can not get consumers",
+			zap.String("stream", stream), zap.String("group", group),
+		)
+		return
 	}
-	return
+
+	sort.Slice(consumers, func(i, j int) bool {
+		return consumers[i].Pending < consumers[j].Pending
+	})
+
+	// half of the sorted consumers
+	end := int(math.Ceil(float64(len(consumers) / 2)))
+	return consumers[:end], nil
 }
 
-func randomActiveConsumer(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
-	var minConsumerPendingMsgCount int64
-	xInfoConsumers, err := cache.Client.XInfoConsumers(ctx, stream, group).Result()
+func getActiveConsumer(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
+	activeConsumers, err := cache.Client.XInfoConsumers(ctx, stream, group).Result()
 	if err != nil {
-		log.Logger.Error("randomActiveConsumer: can not execute xinfo xInfoConsumers cmd for get pending msg xInfoConsumers", zap.Error(err))
+		log.Logger.Error("getActiveConsumer: failed to get active consumers currently", zap.Error(err))
 		return nil, err
 	}
-	for _, consumer := range xInfoConsumers {
-		if consumer.Pending <= minConsumerPendingMsgCount {
-			consumers = append(consumers, consumer)
-			minConsumerPendingMsgCount = consumer.Pending
-		}
+
+	if len(activeConsumers) <= 0 {
+		log.Logger.Warn("getActiveConsumer: no active consumers currently",
+			zap.String("stream", stream), zap.String("group", group),
+		)
+		return nil, err
 	}
-	return
+
+	return activeConsumers, nil
 }
 
 func ClaimPendingMessage(ctx context.Context, stream, group string) error {
-	var consumers []redis.XInfoConsumer
-
 	pendingMessages, err := GetPendingMessages(ctx, stream, group)
 	if err != nil {
 		log.Logger.Error("ClaimPendingMessage: failed to get pending messages", zap.String("stream", stream), zap.String("group", group))
@@ -71,12 +83,17 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 		return nil
 	}
 
-	if consumers, err := GetActiveConsumers(ctx, stream, group); err != nil {
+	consumers, err := GetLowPressureConsumers(ctx, stream, group)
+	if err != nil {
 		log.Logger.Error("ClaimPendingMessage: failed to get active consumer list", zap.String("stream", stream), zap.String("group", group))
 		return err
 	} else if len(consumers) <= 0 {
-		log.Logger.Warn("ClaimPendingMessage: get active consumer result is empty")
-		return nil
+		log.Logger.Info("ClaimPendingMessage: get active consumer result is empty")
+		consumers, err = getActiveConsumer(ctx, stream, group)
+		if err != nil {
+			log.Logger.Error("ClaimPendingMessage: get random consumer failed", zap.Error(err))
+			return err
+		}
 	}
 
 	for _, message := range pendingMessages {

@@ -119,7 +119,7 @@ func (f *FirebasePushClient) Push(ctx context.Context, message *models.PushMessa
 		return res, fmt.Errorf("FirebasePush: no message send to firebase successfully")
 	}
 
-	log.Logger.Info("FirebasePush: send message to firebase for push successfully",
+	log.Logger.Debug("FirebasePush: send message to firebase for push successfully",
 		zap.Int("success_count", res.SuccessCount),
 		zap.Int("failure_count", res.FailureCount),
 		zap.Any("response", res.Responses),

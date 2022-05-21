@@ -159,10 +159,11 @@ func CreateConsumer(ctx context.Context,
 			Block:    2000,
 		}).Result()
 		if err != nil {
-			log.Logger.Debug("Consumer: consumer redis group timeout",
-				zap.String("consumer_name", consumerName),
-				zap.String("group", PushMessageGroupKey),
-				zap.Error(err))
+			// may can ignore timeout error
+			//log.Logger.Debug("Consumer: consumer redis group timeout",
+			//	zap.String("consumer_name", consumerName),
+			//	zap.String("group", PushMessageGroupKey),
+			//	zap.Error(err))
 			continue
 		}
 
@@ -213,7 +214,7 @@ func CreateConsumer(ctx context.Context,
 						continue
 					}
 
-					log.Logger.Info("Consumer: consumer message successfully",
+					log.Logger.Debug("Consumer: consumer message successfully",
 						zap.String("action_id", actionId),
 						zap.String("consumer_name", consumerName),
 						zap.Int64("ack_count", count),

@@ -1,7 +1,6 @@
 package log
 
 import (
-	"github.com/prometheus/common/model"
 	"github.com/shitamachi/push-service/config"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
@@ -95,15 +94,4 @@ func EnsureDirExisted(paths ...string) {
 			}
 		}
 	}
-}
-
-func convertMapToLokiLabels(ms ...map[string]string) map[model.LabelName]model.LabelValue {
-	labels := make(map[model.LabelName]model.LabelValue)
-	for _, m := range ms {
-		for k, v := range m {
-			labels[model.LabelName(k)] = model.LabelValue(v)
-		}
-	}
-
-	return labels
 }

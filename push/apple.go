@@ -104,7 +104,7 @@ func (a *ApplePushClient) Push(ctx context.Context, message *models.PushMessage)
 
 	switch {
 	case rep.StatusCode == http.StatusOK:
-		log.Logger.Info("ApplePush: send push message response ok", zap.Any("message", message))
+		log.Logger.Debug("ApplePush: send push message response ok", zap.Any("message", message))
 		return rep, nil
 	case rep.StatusCode != http.StatusOK:
 		log.Logger.Error("ApplePush: request send ok but apple response not ok",

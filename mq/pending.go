@@ -2,17 +2,18 @@ package mq
 
 import (
 	"context"
+	"fmt"
 	"github.com/cenkalti/backoff/v4"
 	"github.com/go-redis/redis/v8"
 	"github.com/shitamachi/push-service/cache"
 	"github.com/shitamachi/push-service/config"
 	"github.com/shitamachi/push-service/log"
 	"go.uber.org/zap"
-	"math"
-	"math/rand"
 	"sort"
 	"time"
 )
+
+const constIdleTimeout = time.Second * 30
 
 // GetPendingMessages TODO 支持多 stream group
 func GetPendingMessages(ctx context.Context, stream, group string) ([]redis.XPendingExt, error) {
@@ -21,56 +22,13 @@ func GetPendingMessages(ctx context.Context, stream, group string) ([]redis.XPen
 		Group:  group,
 		Start:  "-",
 		End:    "+",
-		Count:  10,
+		Count:  100,
 	}).Result()
 	if err != nil {
 		log.Logger.Error("GetPendingMessages: get pending list failed", zap.String("stream", stream), zap.String("group", group))
 		return nil, err
 	}
 	return pendingList, nil
-}
-
-// GetLowPressureConsumers return low pressure consumer list
-func GetLowPressureConsumers(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
-	consumers, err = cache.Client.XInfoConsumers(ctx, stream, group).Result()
-	if err != nil {
-		log.Logger.Error("GetLowPressureConsumers: failed to get consumers",
-			zap.String("stream", stream), zap.String("group", group), zap.Error(err),
-		)
-		return nil, err
-	}
-
-	if len(consumers) <= 0 {
-		log.Logger.Warn("GetLowPressureConsumers: can not get consumers",
-			zap.String("stream", stream), zap.String("group", group),
-		)
-		return
-	}
-
-	sort.Slice(consumers, func(i, j int) bool {
-		return consumers[i].Pending < consumers[j].Pending
-	})
-
-	// half of the sorted consumers
-	end := int(math.Ceil(float64(len(consumers) / 2)))
-	return consumers[:end], nil
-}
-
-func getActiveConsumer(ctx context.Context, stream, group string) (consumers []redis.XInfoConsumer, err error) {
-	activeConsumers, err := cache.Client.XInfoConsumers(ctx, stream, group).Result()
-	if err != nil {
-		log.Logger.Error("getActiveConsumer: failed to get active consumers currently", zap.Error(err))
-		return nil, err
-	}
-
-	if len(activeConsumers) <= 0 {
-		log.Logger.Warn("getActiveConsumer: no active consumers currently",
-			zap.String("stream", stream), zap.String("group", group),
-		)
-		return nil, err
-	}
-
-	return activeConsumers, nil
 }
 
 func ClaimPendingMessage(ctx context.Context, stream, group string) error {
@@ -83,34 +41,30 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 		return nil
 	}
 
-	consumers, err := GetLowPressureConsumers(ctx, stream, group)
+	claimConsumer, err := GetConsumer(ctx, stream, group)
 	if err != nil {
-		log.Logger.Error("ClaimPendingMessage: failed to get active consumer list", zap.String("stream", stream), zap.String("group", group))
+		log.Logger.Error("ClaimPendingMessage: failed to get consumer",
+			zap.String("stream", stream), zap.String("group", group))
 		return err
-	} else if len(consumers) <= 0 {
-		log.Logger.Info("ClaimPendingMessage: get active consumer result is empty")
-		consumers, err = getActiveConsumer(ctx, stream, group)
-		if err != nil {
-			log.Logger.Error("ClaimPendingMessage: get random consumer failed", zap.Error(err))
-			return err
-		}
 	}
 
 	for _, message := range pendingMessages {
 		var claimPendingMessage = func() error {
-			claimConsumer := consumers[rand.Intn(len(consumers))].Name
+			if message.Idle < constIdleTimeout {
+				return nil
+			}
 			_, err := cache.Client.XClaim(ctx, &redis.XClaimArgs{
 				Stream:   stream,
 				Group:    group,
-				Consumer: claimConsumer,
-				MinIdle:  message.Idle,
+				Consumer: claimConsumer.Name,
+				MinIdle:  constIdleTimeout,
 				Messages: []string{message.ID},
 			}).Result()
 			if err != nil {
 				log.Logger.Error("ClaimPendingMessage: xclaim message to active consumer failed",
 					zap.Error(err),
 					zap.Any("message_info", message),
-					zap.String("claim_consumer", claimConsumer),
+					zap.String("claim_consumer", claimConsumer.Name),
 				)
 				return err
 			}
@@ -147,4 +101,33 @@ func ClaimPendingMessage(ctx context.Context, stream, group string) error {
 	}
 
 	return nil
+}
+
+// GetConsumer return low pressure consumer list
+func GetConsumer(ctx context.Context, stream, group string) (
+	consumer *redis.XInfoConsumer,
+	err error,
+) {
+	consumers, err := cache.Client.XInfoConsumers(ctx, stream, group).Result()
+	if err != nil {
+		log.Logger.Error("Reclaim: failed to get consumers",
+			zap.String("stream", stream),
+			zap.String("group", group),
+			zap.Error(err),
+		)
+		return
+	}
+
+	if len(consumers) <= 0 {
+		log.Logger.Warn("Reclaim: can not get consumers",
+			zap.String("stream", stream), zap.String("group", group),
+		)
+		return nil, fmt.Errorf("get consumer result is empty")
+	}
+
+	sort.Slice(consumers, func(i, j int) bool {
+		return consumers[i].Pending < consumers[j].Pending
+	})
+
+	return &consumers[0], nil
 }

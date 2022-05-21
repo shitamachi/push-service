@@ -101,6 +101,10 @@ func (a *ApplePushClient) Push(ctx context.Context, message *models.PushMessage)
 	}
 
 	rep, err := client.PushWithContext(ctx, notification)
+	if err != nil {
+		log.Logger.Error("ApplePush: push notification failed", zap.Error(err))
+		return nil, err
+	}
 
 	switch {
 	case rep.StatusCode == http.StatusOK:

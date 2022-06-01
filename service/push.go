@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/cenkalti/backoff/v4"
 	"github.com/go-redis/redis/v8"
 	"github.com/mitchellh/mapstructure"
 	"github.com/shitamachi/push-service/cache"
@@ -38,11 +39,10 @@ func InitSendPushQueue(ctx context.Context) {
 		// create consumer
 		for i := 0; i < config.GlobalConfig.Mq.InitCreatedConsumerCount; i++ {
 			go func(i int) {
-				CreateConsumer(
+				NewConsumer(
 					ctx,
 					fmt.Sprintf("push_message_consumer_%d_%d", config.GlobalConfig.WorkerID, i),
 					processPushMessage,
-					recordPushMessageStatus,
 				)
 			}(i)
 		}
@@ -127,10 +127,9 @@ func AddMessageToStream(ctx context.Context, stream string, values interface{}) 
 	return nil
 }
 
-func CreateConsumer(ctx context.Context,
+func NewConsumer(ctx context.Context,
 	consumerName string,
-	processFunc func(context.Context, *redis.XMessage) (bool, error),
-	pushStatusRecord func(ctx2 context.Context, actionId string, status string),
+	processFunc func(context.Context, *redis.XMessage) error,
 ) {
 
 	var (
@@ -174,36 +173,26 @@ func CreateConsumer(ctx context.Context,
 		}
 
 		for _, stream := range streams {
-			var actionId string
 			for _, message := range stream.Messages {
 				actionId, ok := message.Values["action_id"].(string)
 				if !ok {
 					log.Logger.Warn("Consumer: get action id failed",
 						zap.String("type", reflect.TypeOf(actionId).String()))
 				}
-				go pushStatusRecord(ctx, actionId, "receive")
 
-				shouldRetry, err := processFunc(ctx, &message)
+				err = processFunc(ctx, &message)
 
-				if err != nil && shouldRetry {
-					log.Logger.Error("Consumer: consumer streams failed",
-						zap.Error(err),
-						zap.String("action_id", actionId),
-						zap.String("consumer_name", consumerName),
-						zap.String("message_id", message.ID),
-					)
-					continue
-				} else if err != nil {
-					go pushStatusRecord(ctx, actionId, "fail")
+				if err != nil {
 					_, err = cache.Client.XDel(ctx, PushMessageStreamKey, message.ID).Result()
 					if err != nil {
-						log.Logger.Error("Consumer: consume message failed, should not retry, del message failed", zap.Error(err))
+						log.Logger.Error("Consumer: consume message failed, should not retry, del message failed",
+							zap.String("action_id", actionId),
+							zap.Error(err),
+						)
 						continue
 					}
 					log.Logger.Debug("Consumer: del message successfully", zap.Any("message", message))
 				} else {
-					go pushStatusRecord(ctx, actionId, "success")
-
 					count, outAckErr := cache.Client.XAck(ctx, PushMessageStreamKey, PushMessageGroupKey, message.ID).Result()
 					if outAckErr != nil {
 						log.Logger.Error("Consumer: ack message failed",
@@ -222,88 +211,90 @@ func CreateConsumer(ctx context.Context,
 					)
 				}
 			}
-			setRecordPushMessageStatusKeyExpireTime(ctx, actionId)
 		}
 	}
 }
 
-func processPushMessage(ctx context.Context, message *redis.XMessage) (shouldRetry bool, err error) {
+func processPushMessage(ctx context.Context, message *redis.XMessage) (err error) {
 	var psm = new(PushStreamMessage)
-	err = mapstructure.Decode(message.Values, psm)
 	psm.Data = psm.BaseMessage.DecodeData()
+	err = mapstructure.Decode(message.Values, psm)
 	if err != nil {
-		log.Logger.Error("processPushMessage: can not decode map to struct")
-		return false, fmt.Errorf("processPushMessage: can not decode map to struct")
+		log.Logger.Error("Push: can not decode map to struct", zap.Any("message", message))
+		return fmt.Errorf("can not decode map to struct PushStreamMessage")
 	}
-	client := getProcessPushMessageClient(psm.AppId)
-	if client == nil {
-		log.Logger.Warn("processPushMessage: can not get push message client")
+
+	client, err := getPushClientByAppId(psm.AppId)
+	if err != nil {
+		log.Logger.Warn("Push: can not get push message client by app id", zap.String("app_id", psm.AppId))
 		return
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	err = backoff.RetryNotify(
+		// operation func
+		func() error {
+			ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+			defer cancel()
 
-	_, err = client.Push(ctx, models.NewPushMessage(psm.AppId, psm.Token).SetBaseMessage(psm.BaseMessage))
+			_, err = client.Push(ctx, models.NewPushMessage(psm.AppId, psm.Token).SetBaseMessage(psm.BaseMessage))
+			switch {
+			case errors.Is(err, context.DeadlineExceeded):
+				log.Logger.Warn("Push: send push message timeout")
+				return err
+			case err != nil:
+				// should not retry
+				log.Logger.Info("Push: push notification failed",
+					zap.Error(err),
+					zap.String("app_id", psm.AppId),
+					zap.Any("message", psm.BaseMessage),
+				)
+				return backoff.Permanent(err)
+			}
+			return err
+		},
+		// backoff policy
+		backoff.WithMaxRetries(backoff.NewExponentialBackOff(), 3),
+		// notify func
+		func(err error, duration time.Duration) {
+			log.Logger.Info("Push: failed to push message, will retry push again",
+				zap.String("app_id", psm.AppId),
+				zap.Error(err),
+			)
+		})
 
-	switch {
-	case errors.Is(err, context.DeadlineExceeded):
-		log.Logger.Warn("processPushMessage: send push message timeout")
-		return true, err
-	case err != nil:
-		log.Logger.Error("processPushMessage: push notification failed", zap.Error(err))
-		return false, err
+	if err != nil {
+		log.Logger.Error("Push: failed to push message",
+			zap.String("app_id", psm.AppId),
+			zap.Error(err),
+			zap.Any("message", psm.BaseMessage),
+		)
 	}
 
-	return false, nil
+	return
 }
 
-func getProcessPushMessageClient(appID string) push.Pusher {
+func getPushClientByAppId(appID string) (push.Pusher, error) {
+	err := fmt.Errorf("can not get push client item form config by app id=\"%s\"", appID)
+
 	if len(appID) <= 0 {
-		return nil
+		return nil, err
 	}
 
 	item, ok := config.GlobalConfig.ClientConfig[appID]
 	if ok {
 		switch item.PushType {
 		case config_entries.ApplePush:
-			return push.GlobalApplePushClient
+			return push.GlobalApplePushClient, nil
 		case config_entries.FirebasePush:
-			return push.GlobalFirebasePushClient
+			return push.GlobalFirebasePushClient, nil
 		default:
-			log.Logger.Error("getProcessPushMessageClient: can not match app id with anyone in config",
+			log.Logger.Warn("Push: can not match app id with anyone in config",
 				zap.String("app_id", appID))
-			return nil
+			return nil, err
 		}
 	} else {
-		log.Logger.Error("getProcessPushMessageClient: can not get push client item form config by app id",
+		log.Logger.Warn("Push: can not get push client item form config by app id",
 			zap.String("app_id", appID))
-		return nil
+		return nil, err
 	}
-}
-
-// todo not set ExpireTime
-func recordPushMessageStatus(ctx context.Context, actionId string, status string) {
-	//todo
-	key := getRecordPushMessageStatusKey(actionId)
-
-	cache.Client.ZAddArgs(ctx, getRecordPushMessageStatusKey(actionId), redis.ZAddArgs{
-		Members: []redis.Z{
-			{
-				Score:  1,
-				Member: status,
-			},
-		},
-	})
-	cache.Client.Expire(ctx, key, time.Hour*24*7)
-
-}
-
-func getRecordPushMessageStatusKey(actionId string) string {
-	return fmt.Sprintf("push_status_%s", actionId)
-}
-
-func setRecordPushMessageStatusKeyExpireTime(ctx context.Context, actionId string) {
-	key := getRecordPushMessageStatusKey(actionId)
-	cache.Client.Expire(ctx, key, time.Hour*24*7)
 }

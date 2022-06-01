@@ -36,7 +36,7 @@ func InitSendPushQueue(ctx context.Context) {
 		log.Logger.Info("InitSendPushQueue: CreateMQGroup successfully")
 
 		// create consumer
-		for i := 0; i < 5; i++ {
+		for i := 0; i < config.GlobalConfig.Mq.InitCreatedConsumerCount; i++ {
 			go func(i int) {
 				CreateConsumer(
 					ctx,
@@ -155,7 +155,7 @@ func CreateConsumer(ctx context.Context,
 			Streams:  []string{PushMessageStreamKey, consumerId},
 			Group:    PushMessageGroupKey,
 			Consumer: consumerName,
-			Count:    1, // once consumer one message
+			Count:    int64(config.GlobalConfig.Mq.OnceReadMessageCount), // once consumer one message
 			Block:    2000,
 		}).Result()
 		if err != nil {

@@ -49,18 +49,10 @@
       "service_account_file_content": "your firebase service account file content"
     }
   },
-  "loki": {
-    "url": "http://127.0.0.1:3100/loki/api/v1/push",
-    "source": "push-service",
-    "level_name": "severity",
-    "send_level": 0,
-    "labels": {
-      "instance": "local_01",
-      "env": "dev"
-    }
-  },
   "mq": {
     "recover_message_duration": 60000,
-    "max_retry_count": 10
+    "max_retry_count": 10,
+    "once_read_message_count": 10,
+    "init_created_consumer_count": 5
   }
 }

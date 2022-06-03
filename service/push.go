@@ -83,13 +83,14 @@ func ProcessPushMessage(ctx context.Context, message *redisqueue.Message) (err e
 }
 
 func getPushClientByAppId(ctx context.Context, appID string) (push.Pusher, error) {
+	conf := config.GetFromContext(ctx)
 	err := fmt.Errorf("can not get push client item form config by app id=\"%s\"", appID)
 
 	if len(appID) <= 0 {
 		return nil, err
 	}
 
-	item, ok := config.GlobalConfig.ClientConfig[appID]
+	item, ok := conf.ClientConfig[appID]
 	if ok {
 		switch item.PushType {
 		case config_entries.ApplePush:

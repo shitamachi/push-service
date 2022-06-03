@@ -2,7 +2,6 @@ package log
 
 import (
 	"context"
-	"github.com/shitamachi/push-service/api"
 	"go.uber.org/zap"
 )
 
@@ -15,14 +14,7 @@ func SetLoggerToContext(ctx context.Context, logger *zap.Logger) context.Context
 }
 
 func WithCtx(ctx context.Context) *zap.Logger {
-	var l *zap.Logger
-	switch ctx.(type) {
-	case *api.Context:
-		l = ctx.(*api.Context).Logger
-	default:
-		v := ctx.Value(key)
-		l = v.(*zap.Logger)
-	}
+	l := ctx.Value(key).(*zap.Logger)
 
 	if l == nil {
 		l = zap.L()

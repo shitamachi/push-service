@@ -1,6 +1,7 @@
 package config
 
 import (
+	"context"
 	"encoding/json"
 	"github.com/shitamachi/push-service/config/config_entries"
 	"os"
@@ -34,4 +35,21 @@ func InitConfig() *AppConfig {
 		panic(err)
 	}
 	return &config
+}
+
+type SetConfigToContextKey string
+
+var key = SetConfigToContextKey("config")
+
+func SetToContext(ctx context.Context, config *AppConfig) context.Context {
+	return context.WithValue(ctx, key, config)
+}
+
+func GetFromContext(ctx context.Context) *AppConfig {
+	config := ctx.Value(key).(*AppConfig)
+	if config == nil {
+		config = InitConfig()
+	}
+
+	return config
 }

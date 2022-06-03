@@ -174,6 +174,10 @@ func (ctx *Context) Err() error {
 }
 
 func (ctx *Context) Value(key any) any {
+	v := ctx.AppContext.Value(key)
+	if v != nil {
+		return v
+	}
 	if ctx.Req == nil || ctx.Req.Context() == nil {
 		return nil
 	}

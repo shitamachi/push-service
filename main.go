@@ -73,7 +73,7 @@ func main() {
 	)
 	utils.CheckErr(err)
 
-	appContext := api.NewAppContext(logger, redisClient, client, consumer, producer)
+	appContext := api.NewAppContext(appConfig, logger, redisClient, client, consumer, producer)
 
 	// init router
 	r := router.InitRouter(appConfig, appContext)

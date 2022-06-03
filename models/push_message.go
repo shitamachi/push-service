@@ -78,8 +78,9 @@ func (m *PushMessage) SetBaseMessage(bs BaseMessage) *PushMessage {
 	return m
 }
 
-func (m *PushMessage) ConvertToPushPayload(appId string) interface{} {
-	item, ok := config.GlobalConfig.ClientConfig[appId]
+func (m *PushMessage) ConvertToPushPayload(ctx context.Context, appId string) interface{} {
+	conf := config.GetFromContext(ctx)
+	item, ok := conf.ClientConfig[appId]
 	if !ok {
 		return fmt.Errorf("unknown app id")
 	}
@@ -103,7 +104,7 @@ func (m *PushMessage) Build(ctx context.Context) interface{} {
 		log.WithCtx(ctx).Error("PushMessage Build app id or token not set")
 		return nil
 	}
-	item, ok := config.GlobalConfig.ClientConfig[m.appId]
+	item, ok := config.GetFromContext(ctx).ClientConfig[m.appId]
 	if !ok {
 		log.WithCtx(ctx).Error("PushMessage Build unknown app id")
 		return nil
@@ -136,7 +137,7 @@ func (m *PushMessage) Build(ctx context.Context) interface{} {
 }
 
 func (m *PushMessage) Bytes(ctx context.Context) ([]byte, error) {
-	bytes, err := json.Marshal(m.ConvertToPushPayload(m.appId))
+	bytes, err := json.Marshal(m.ConvertToPushPayload(ctx, m.appId))
 	if err != nil {
 		log.WithCtx(ctx).Error("PushMessage: to bytes failed")
 		return nil, err

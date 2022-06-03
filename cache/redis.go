@@ -3,19 +3,16 @@ package cache
 import (
 	"context"
 	"github.com/go-redis/redis/v8"
-	"github.com/shitamachi/push-service/config"
-	"github.com/shitamachi/push-service/log"
-	"go.uber.org/zap"
+	"github.com/shitamachi/push-service/config/config_entries"
 	"time"
 )
 
-var Client *redis.Client
+func InitRedis(ctx context.Context, conf config_entries.CacheConfig) (*redis.Client, error) {
 
-func InitRedis() {
-
-	var cli *redis.Client
-	var err error
-	var conf = config.GlobalConfig.CacheConfig
+	var (
+		cli *redis.Client
+		err error
+	)
 
 	cli = redis.NewClient(&redis.Options{
 		Addr:         conf.RedisAddr,
@@ -25,12 +22,10 @@ func InitRedis() {
 		WriteTimeout: time.Duration(conf.WriteTimeout) * time.Second,
 	})
 
-	_, err = cli.Ping(context.Background()).Result()
+	_, err = cli.Ping(ctx).Result()
 	if err != nil {
-		log.Logger.Fatal("get connection to redis failed", zap.Error(err))
+		panic(err)
 	}
 
-	log.Logger.Info("init cache redis client successfully")
-
-	Client = cli
+	return cli, err
 }

@@ -6,6 +6,6 @@ import (
 )
 
 type Pusher interface {
-	GetClientByAppID(appId string) (interface{}, bool)
+	GetClientByAppID(ctx context.Context, appId string) (interface{}, bool)
 	Push(ctx context.Context, message *models.PushMessage) (interface{}, error)
 }

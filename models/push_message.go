@@ -1,6 +1,7 @@
 package models
 
 import (
+	"context"
 	"encoding/json"
 	"firebase.google.com/go/v4/messaging"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"github.com/shitamachi/push-service/utils"
 	"github.com/sideshow/apns2"
 	"github.com/sideshow/apns2/payload"
+	"go.uber.org/zap"
 )
 
 type BaseMessage struct {
@@ -96,14 +98,14 @@ func (m *PushMessage) ConvertToPushPayload(appId string) interface{} {
 	}
 }
 
-func (m *PushMessage) Build() interface{} {
+func (m *PushMessage) Build(ctx context.Context) interface{} {
 	if len(m.appId) <= 0 || len(m.token) <= 0 {
-		log.Logger.Error("PushMessage Build app id or token not set")
+		log.WithCtx(ctx).Error("PushMessage Build app id or token not set")
 		return nil
 	}
 	item, ok := config.GlobalConfig.ClientConfig[m.appId]
 	if !ok {
-		log.Logger.Error("PushMessage Build unknown app id")
+		log.WithCtx(ctx).Error("PushMessage Build unknown app id")
 		return nil
 	}
 	switch item.PushType {
@@ -128,22 +130,22 @@ func (m *PushMessage) Build() interface{} {
 			Token: m.token,
 		}
 	default:
-		log.Logger.Error("PushMessage Build \t\tlog.Logger.Error(\"PushMessage Build \")\n")
+		log.WithCtx(ctx).Error("PushMessage Build \t\tlog.Logger.Error(\"PushMessage Build \")\n")
 		return nil
 	}
 }
 
-func (m *PushMessage) Bytes() ([]byte, error) {
+func (m *PushMessage) Bytes(ctx context.Context) ([]byte, error) {
 	bytes, err := json.Marshal(m.ConvertToPushPayload(m.appId))
 	if err != nil {
-		log.Logger.Error("PushMessage: to bytes failed")
+		log.WithCtx(ctx).Error("PushMessage: to bytes failed")
 		return nil, err
 	}
 	return bytes, nil
 }
 
-func (m *PushMessage) String() (string, error) {
-	bytes, err := m.Bytes()
+func (m *PushMessage) String(ctx context.Context) (string, error) {
+	bytes, err := m.Bytes(ctx)
 	if err != nil {
 		return "", err
 	}
@@ -170,33 +172,35 @@ func (m *PushMessage) ToMap() map[string]interface{} {
 	}
 }
 
-func (m *PushMessage) ToRedisStreamValues(other map[string]interface{}) map[string]interface{} {
+func (m *PushMessage) ToRedisStreamValues(ctx context.Context, other map[string]interface{}) map[string]interface{} {
 	return utils.MergeMap(map[string]interface{}{
 		"title": m.Title,
 		"body":  m.Body,
-		"data":  m.BaseMessage.EncodeData(),
+		"data":  m.BaseMessage.EncodeData(ctx),
 	}, other)
 }
 
-func (bm *BaseMessage) EncodeData() string {
+func (bm *BaseMessage) EncodeData(ctx context.Context) string {
 	bytes, err := json.Marshal(bm.Data)
 	if err != nil {
-		log.Logger.Error("EncodeData: failed to encode BaseMessage data to json")
+		log.WithCtx(ctx).Error("EncodeData: failed to encode BaseMessage data to json")
 		return ""
 	}
 	return string(bytes)
 }
 
-func (bm *BaseMessage) DecodeData() map[string]string {
+func (bm *BaseMessage) DecodeData(ctx context.Context) map[string]string {
 	data, ok := bm.Data["data"]
 	if !ok {
-		log.Logger.Error("DecodeData: failed to get value from encoded BaseMessage data map[string]interface{}")
+		log.WithCtx(ctx).Error("DecodeData: failed to get value from encoded BaseMessage data map[string]interface{}",
+			zap.Any("message", bm),
+		)
 		return nil
 	}
 	m := make(map[string]string)
 	err := json.Unmarshal([]byte(data), &m)
 	if err != nil {
-		log.Logger.Error("DecodeData: failed to decode BaseMessage data str to map[string]interface{}")
+		log.WithCtx(ctx).Error("DecodeData: failed to decode BaseMessage data str to map[string]interface{}")
 		return nil
 	}
 	return m

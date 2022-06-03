@@ -30,22 +30,22 @@ func NewFirebasePushClient() *FirebasePushClient {
 	return &FirebasePushClient{}
 }
 
-func InitFirebasePush() {
+func InitFirebasePush(ctx context.Context) {
 	for packageName := range config.GlobalConfig.FirebasePushConfig.Items {
-		client, err := NewFirebasePushClientItem(packageName)
+		client, err := NewFirebasePushClientItem(ctx, packageName)
 		if err != nil {
-			log.Logger.Error("InitFirebasePush: can not create firebase push client", zap.String("package_name", packageName))
+			log.WithCtx(ctx).Error("InitFirebasePush: can not create firebase push client", zap.String("package_name", packageName))
 			continue
 		}
 		if GlobalFirebasePushClient == nil {
 			GlobalFirebasePushClient = NewFirebasePushClient()
 		}
-		log.Logger.Info("InitFirebasePush: init firebase message client successfully", zap.String("package_name", packageName))
+		log.WithCtx(ctx).Info("InitFirebasePush: init firebase message client successfully", zap.String("package_name", packageName))
 		GlobalFirebasePushClient.clients.Store(packageName, client)
 	}
 }
 
-func NewFirebasePushClientItem(packageName string) (*messaging.Client, error) {
+func NewFirebasePushClientItem(ctx context.Context, packageName string) (*messaging.Client, error) {
 	configItem, ok := config.GlobalConfig.FirebasePushConfig.Items[packageName]
 	if !ok {
 		return nil, NewWrappedError(fmt.Sprintf("init google %s push client failed", packageName), CanNotGetClientFromConfig)
@@ -53,21 +53,21 @@ func NewFirebasePushClientItem(packageName string) (*messaging.Client, error) {
 	opts := option.WithCredentialsJSON([]byte(configItem.ServiceAccountFileContent))
 	app, err := firebase.NewApp(context.Background(), nil, opts)
 	if err != nil {
-		log.Logger.Error("NewFirebasePushClientItem: error initializing firebase app", zap.String("app", packageName), zap.Error(err))
+		log.WithCtx(ctx).Error("NewFirebasePushClientItem: error initializing firebase app", zap.String("app", packageName), zap.Error(err))
 		return nil, err
 	}
 	client, err := app.Messaging(context.Background())
 	if err != nil {
-		log.Logger.Error("NewFirebasePushClientItem: error initializing message client", zap.String("app", packageName), zap.Error(err))
+		log.WithCtx(ctx).Error("NewFirebasePushClientItem: error initializing message client", zap.String("app", packageName), zap.Error(err))
 		return nil, NewWrappedError(fmt.Sprintf("init %s push message client failed", packageName), err)
 	}
 	return client, nil
 }
 
-func (f *FirebasePushClient) GetClientByAppID(appID string) (interface{}, bool) {
+func (f *FirebasePushClient) GetClientByAppID(ctx context.Context, appID string) (interface{}, bool) {
 	value, ok := f.clients.Load(appID)
 	if !ok {
-		log.Logger.Error("GetClientByAppID: can not get client from global one", zap.String("package_name", appID))
+		log.WithCtx(ctx).Error("GetClientByAppID: can not get client from global one", zap.String("package_name", appID))
 		return nil, false
 	}
 	return value, true
@@ -75,26 +75,26 @@ func (f *FirebasePushClient) GetClientByAppID(appID string) (interface{}, bool) 
 
 func (f *FirebasePushClient) Push(ctx context.Context, message *models.PushMessage) (interface{}, error) {
 	if message == nil {
-		log.Logger.Error("Firebase Push: get param message is nil")
+		log.WithCtx(ctx).Error("Firebase Push: get param message is nil")
 		return nil, errors.New("message is nil")
 	}
 	// get push message client
-	value, ok := f.GetClientByAppID(message.GetAppId())
+	value, ok := f.GetClientByAppID(ctx, message.GetAppId())
 	if !ok || value == nil {
-		log.Logger.Error("Firebase Push: can not get push client, value is nil or get operation not ok", zap.String("app", message.GetAppId()))
+		log.WithCtx(ctx).Error("Firebase Push: can not get push client, value is nil or get operation not ok", zap.String("app", message.GetAppId()))
 		return nil, NewWrappedError(fmt.Sprintf("get %s push client failed", message.GetAppId()), CanNotGetPushClient)
 	}
 	client, ok := value.(*messaging.Client)
 	if !ok {
-		log.Logger.Error("Firebase Push: got firebase client value from global instance, but convert to *messaging.Client failed",
+		log.WithCtx(ctx).Error("Firebase Push: got firebase client value from global instance, but convert to *messaging.Client failed",
 			zap.String("app", message.GetAppId()),
 			zap.String("type", reflect.TypeOf(client).String()))
 		return nil, NewWrappedError("can not convert client value to *messaging.Client", ConvertToSpecificPlatformClientFailed)
 	}
 
-	msg, ok := message.Build().(*messaging.Message)
+	msg, ok := message.Build(ctx).(*messaging.Message)
 	if !ok {
-		log.Logger.Error("Firebase Push: got message ok, but convert to *messaging.Message failed",
+		log.WithCtx(ctx).Error("Firebase Push: got message ok, but convert to *messaging.Message failed",
 			zap.String("app", message.GetAppId()),
 			zap.String("type", reflect.TypeOf(msg).String()))
 		return nil, NewWrappedError("can not convert message to firebase *messaging.Message", ConvertToSpecificPlatformMessageFailed)
@@ -102,7 +102,7 @@ func (f *FirebasePushClient) Push(ctx context.Context, message *models.PushMessa
 	res, err := client.SendAll(ctx, []*messaging.Message{msg})
 
 	if err != nil {
-		log.Logger.Error("FirebasePush: send push request to firebase failed",
+		log.WithCtx(ctx).Error("FirebasePush: send push request to firebase failed",
 			zap.String("app", message.GetAppId()),
 			zap.Any("message", message),
 			zap.Error(err),
@@ -111,7 +111,7 @@ func (f *FirebasePushClient) Push(ctx context.Context, message *models.PushMessa
 	}
 
 	if res.SuccessCount <= 0 {
-		log.Logger.Error("FirebasePush: no message send to firebase successfully",
+		log.WithCtx(ctx).Error("FirebasePush: no message send to firebase successfully",
 			zap.Int("success_count", res.SuccessCount),
 			zap.Int("failure_count", res.FailureCount),
 			zap.Any("response", res.Responses),
@@ -119,7 +119,7 @@ func (f *FirebasePushClient) Push(ctx context.Context, message *models.PushMessa
 		return res, fmt.Errorf("FirebasePush: no message send to firebase successfully")
 	}
 
-	log.Logger.Debug("FirebasePush: send message to firebase for push successfully",
+	log.WithCtx(ctx).Debug("FirebasePush: send message to firebase for push successfully",
 		zap.Int("success_count", res.SuccessCount),
 		zap.Int("failure_count", res.FailureCount),
 		zap.Any("response", res.Responses),

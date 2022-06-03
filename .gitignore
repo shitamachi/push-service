@@ -33,3 +33,7 @@ bin/
 
 # secret files
 secret/
+
+# go workspace file
+go.work
+go.work.sum

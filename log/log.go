@@ -9,57 +9,43 @@ import (
 	"path/filepath"
 )
 
-var (
-	Logger *zap.Logger
-	Sugar  *zap.SugaredLogger
-)
-
-func InitLogger() {
+func InitLogger(config *config.AppConfig) (logger *zap.Logger, err error) {
 
 	var mode string
-	if len(config.GlobalConfig.LogMode) > 0 {
-		mode = config.GlobalConfig.LogMode
+	if len(config.LogMode) > 0 {
+		mode = config.LogMode
 	} else {
-		mode = config.GlobalConfig.Mode
+		mode = config.Mode
 	}
 
 	switch mode {
 	case "debug":
-		logger, err := zap.NewDevelopment()
+		logger, err = zap.NewDevelopment()
 		if err != nil {
 			panic(err)
 		}
-		Logger = logger
-		Sugar = logger.Sugar()
 	case "test":
 		devEncoder := newDevEncoder()
-		testCore := zapcore.NewCore(devEncoder, getLogWriter(), zap.LevelEnablerFunc(func(level zapcore.Level) bool {
+		testCore := zapcore.NewCore(devEncoder, getLogWriter(config), zap.LevelEnablerFunc(func(level zapcore.Level) bool {
 			//所有 debug 以上级别（不包含 debug ）的日志将被输出到本地
 			return level > zap.DebugLevel
 		}))
-		logger := zap.New(zapcore.NewTee(testCore), zap.AddCaller(), zap.AddCallerSkip(1))
-
-		Logger = logger
-		Sugar = logger.Sugar()
+		logger = zap.New(zapcore.NewTee(testCore), zap.AddCaller(), zap.AddCallerSkip(1))
 	case "release":
 		releaseEncoder := newReleaseEncoder()
-		testCore := zapcore.NewCore(releaseEncoder, getLogWriter(), zap.LevelEnablerFunc(func(level zapcore.Level) bool {
+		testCore := zapcore.NewCore(releaseEncoder, getLogWriter(config), zap.LevelEnablerFunc(func(level zapcore.Level) bool {
 			//所有 debug 以上级别（不包含 debug ）的日志将被输出到本地
 			return level > zap.DebugLevel
 		}))
-		logger := zap.New(zapcore.NewTee(testCore), zap.AddCaller(), zap.AddCallerSkip(1))
-
-		Logger = logger
-		Sugar = logger.Sugar()
+		logger = zap.New(zapcore.NewTee(testCore), zap.AddCaller(), zap.AddCallerSkip(1))
 	default:
-		logger, err := zap.NewDevelopment()
+		logger, err = zap.NewDevelopment()
 		if err != nil {
 			panic(err)
 		}
-
-		Logger = logger
-		Sugar = logger.Sugar()
 	}
+
+	return
 }
 
 func newDevEncoder() zapcore.Encoder {
@@ -76,8 +62,8 @@ func newReleaseEncoder() zapcore.Encoder {
 	return zapcore.NewJSONEncoder(encoderConfig)
 }
 
-func getLogWriter() zapcore.WriteSyncer {
-	logPath := config.GlobalConfig.LogFilePath
+func getLogWriter(config *config.AppConfig) zapcore.WriteSyncer {
+	logPath := config.LogFilePath
 	EnsureDirExisted(logPath)
 	writer := &lumberjack.Logger{
 		Filename:   logPath,

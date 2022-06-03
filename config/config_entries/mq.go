@@ -6,4 +6,5 @@ type MqConfig struct {
 	MaxRetryCount            int `json:"max_retry_count"`
 	OnceReadMessageCount     int `json:"once_read_message_count"`
 	InitCreatedConsumerCount int `json:"init_created_consumer_count"`
+	MaxPendingTime           int `json:"max_pending_time"`
 }

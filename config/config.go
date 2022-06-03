@@ -25,15 +25,15 @@ type AppConfig struct {
 
 var GlobalConfig *AppConfig
 
-func init() {
+func InitConfig() *AppConfig {
 	bytes, err := os.ReadFile("conf/conf.json")
 	if err != nil {
 		panic(err)
 	}
-	var tmp AppConfig
-	err = json.Unmarshal(bytes, &tmp)
+	var config AppConfig
+	err = json.Unmarshal(bytes, &config)
 	if err != nil {
 		panic(err)
 	}
-	GlobalConfig = &tmp
+	return &config
 }

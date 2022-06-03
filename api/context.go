@@ -5,9 +5,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"io"
 	"net/http"
+	"time"
 )
 
 type Context struct {
+	*AppContext
 	Writer http.ResponseWriter
 	Req    *http.Request
 }
@@ -86,11 +88,12 @@ func HandleFunc(pattern string, f func(ctx *Context) []ResponseOption) {
 	})
 }
 
-func WrapperGinHandleFunc(f func(ctx *Context) ResponseOptions) gin.HandlerFunc {
+func (ctx *Context) WrapperGinHandleFunc(f func(ctx *Context) ResponseOptions) gin.HandlerFunc {
 	return func(c *gin.Context) {
 		responseOptions := f(&Context{
-			Writer: c.Writer,
-			Req:    c.Request,
+			AppContext: ctx.AppContext,
+			Writer:     c.Writer,
+			Req:        c.Request,
 		})
 		response := NewResponse(responseOptions)
 
@@ -145,6 +148,34 @@ func ErrorWithOpts(httpCode int, opts ...ResponseOption) []ResponseOption {
 	return append(opts, HttpCode(httpCode))
 }
 
-func (c *Context) GetBody() ([]byte, error) {
-	return io.ReadAll(c.Req.Body)
+func (ctx *Context) GetBody() ([]byte, error) {
+	return io.ReadAll(ctx.Req.Body)
+}
+
+func (ctx *Context) Deadline() (deadline time.Time, ok bool) {
+	if ctx.Req == nil || ctx.Req.Context() == nil {
+		return
+	}
+	return ctx.Req.Context().Deadline()
+}
+
+func (ctx *Context) Done() <-chan struct{} {
+	if ctx.Req == nil || ctx.Req.Context() == nil {
+		return nil
+	}
+	return ctx.Req.Context().Done()
+}
+
+func (ctx *Context) Err() error {
+	if ctx.Req == nil || ctx.Req.Context() == nil {
+		return nil
+	}
+	return ctx.Req.Context().Err()
+}
+
+func (ctx *Context) Value(key any) any {
+	if ctx.Req == nil || ctx.Req.Context() == nil {
+		return nil
+	}
+	return ctx.Req.Context().Value(key)
 }

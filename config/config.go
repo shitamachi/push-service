@@ -23,8 +23,6 @@ type AppConfig struct {
 	Mq                 config_entries.MqConfig                    `json:"mq"`
 }
 
-var GlobalConfig *AppConfig
-
 func InitConfig() *AppConfig {
 	bytes, err := os.ReadFile("conf/conf.json")
 	if err != nil {

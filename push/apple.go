@@ -23,9 +23,9 @@ func NewApplePushClient() *ApplePushClient {
 	return &ApplePushClient{}
 }
 
-func InitApplePush(ctx context.Context) {
-	for bundleID := range config.GlobalConfig.ApplePushConfig.Items {
-		pushClientItem, err := NewApplePushClientItem(ctx, bundleID)
+func InitApplePush(ctx context.Context, appConfig *config.AppConfig) {
+	for bundleID := range appConfig.ApplePushConfig.Items {
+		pushClientItem, err := NewApplePushClientItem(ctx, appConfig, bundleID)
 		if err != nil {
 			log.WithCtx(ctx).Error("InitApplePush: can not create apple push client", zap.String("bundle_id", bundleID))
 			continue
@@ -39,8 +39,8 @@ func InitApplePush(ctx context.Context) {
 	}
 }
 
-func NewApplePushClientItem(ctx context.Context, bundleID string) (*apns2.Client, error) {
-	pushConfigItem, ok := config.GlobalConfig.ApplePushConfig.Items[bundleID]
+func NewApplePushClientItem(ctx context.Context, appConfig *config.AppConfig, bundleID string) (*apns2.Client, error) {
+	pushConfigItem, ok := appConfig.ApplePushConfig.Items[bundleID]
 	if !ok {
 		return nil, NewWrappedError(fmt.Sprintf("init apple %s push client failed", bundleID), CanNotGetClientFromConfig)
 	}
@@ -59,7 +59,7 @@ func NewApplePushClientItem(ctx context.Context, bundleID string) (*apns2.Client
 	}
 
 	var client *apns2.Client
-	switch config.GlobalConfig.Mode {
+	switch appConfig.Mode {
 	case "debug", "test":
 		client = apns2.NewTokenClient(appleToken).Development()
 		log.WithCtx(ctx).Info("NewApplePushClient: init development apple push client successfully", zap.String("bundle_id", pushConfigItem.BundleID))

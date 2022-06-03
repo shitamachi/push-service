@@ -57,8 +57,8 @@ func main() {
 	redisClient, err := cache.InitRedis(ctx, appConfig.CacheConfig)
 	utils.CheckErr(err)
 	// init push client
-	push.InitApplePush(ctx)
-	push.InitFirebasePush(ctx)
+	push.InitApplePush(ctx, appConfig)
+	push.InitFirebasePush(ctx, appConfig)
 	// init message producer
 	producer, err := mq.InitProducer(ctx, redisClient)
 	utils.CheckErr(err)

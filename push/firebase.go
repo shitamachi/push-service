@@ -30,9 +30,9 @@ func NewFirebasePushClient() *FirebasePushClient {
 	return &FirebasePushClient{}
 }
 
-func InitFirebasePush(ctx context.Context) {
-	for packageName := range config.GlobalConfig.FirebasePushConfig.Items {
-		client, err := NewFirebasePushClientItem(ctx, packageName)
+func InitFirebasePush(ctx context.Context, appConfig *config.AppConfig) {
+	for packageName := range appConfig.FirebasePushConfig.Items {
+		client, err := NewFirebasePushClientItem(ctx, appConfig, packageName)
 		if err != nil {
 			log.WithCtx(ctx).Error("InitFirebasePush: can not create firebase push client", zap.String("package_name", packageName))
 			continue
@@ -45,8 +45,8 @@ func InitFirebasePush(ctx context.Context) {
 	}
 }
 
-func NewFirebasePushClientItem(ctx context.Context, packageName string) (*messaging.Client, error) {
-	configItem, ok := config.GlobalConfig.FirebasePushConfig.Items[packageName]
+func NewFirebasePushClientItem(ctx context.Context, appConfig *config.AppConfig, packageName string) (*messaging.Client, error) {
+	configItem, ok := appConfig.FirebasePushConfig.Items[packageName]
 	if !ok {
 		return nil, NewWrappedError(fmt.Sprintf("init google %s push client failed", packageName), CanNotGetClientFromConfig)
 	}

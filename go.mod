@@ -21,7 +21,7 @@ require (
 	github.com/mailru/easyjson v0.7.7 // indirect
 	github.com/mattn/go-isatty v0.0.14 // indirect
 	github.com/mitchellh/mapstructure v1.5.0
-	github.com/shitamachi/redisqueue/v2 v2.2.2
+	github.com/shitamachi/redisqueue/v2 v2.2.3
 	github.com/sideshow/apns2 v0.23.0
 	github.com/stretchr/testify v1.7.1
 	github.com/swaggo/files v0.0.0-20210815190702-a29dd2bc99b2

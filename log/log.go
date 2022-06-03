@@ -16,7 +16,14 @@ var (
 
 func InitLogger() {
 
-	switch config.GlobalConfig.Mode {
+	var mode string
+	if len(config.GlobalConfig.LogMode) > 0 {
+		mode = config.GlobalConfig.LogMode
+	} else {
+		mode = config.GlobalConfig.Mode
+	}
+
+	switch mode {
 	case "debug":
 		logger, err := zap.NewDevelopment()
 		if err != nil {

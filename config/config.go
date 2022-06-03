@@ -13,6 +13,7 @@ type AppConfig struct {
 	Mode string `json:"mode"`
 	// server port
 	Port               int                                        `json:"port"`
+	LogMode            string                                     `json:"log_mode"`
 	LogFilePath        string                                     `json:"log_file_path"`
 	ClientConfig       map[string]config_entries.ClientConfigItem `json:"client_config"`
 	DBConfig           config_entries.DBConfigItem                `json:"db_config"`

@@ -2,6 +2,7 @@
   "worker_id": 1,
   "mode": "debug",
   "port": 8899,
+  "log_mode": "debug",
   "log_file_path": "/data/log/app.log",
   "db_config": {
     "addr": "127.0.0.1",

@@ -16,14 +16,15 @@ func InitConsumer(
 	consumerFunc redisqueue.ConsumerFunc,
 ) (*redisqueue.Consumer, error) {
 	c, err := redisqueue.NewConsumerWithOptions(&redisqueue.ConsumerOptions{
-		Ctx:               ctx,
-		GroupName:         group,
-		VisibilityTimeout: 10 * time.Second,
-		BlockingTimeout:   5 * time.Second,
-		ReclaimInterval:   1 * time.Second,
-		BufferSize:        100,
-		Concurrency:       10,
-		RedisClient:       redisClient,
+		Ctx:                  ctx,
+		GroupName:            group,
+		VisibilityTimeout:    10 * time.Second,
+		BlockingTimeout:      5 * time.Second,
+		ReclaimInterval:      1 * time.Second,
+		ReclaimMaxRetryCount: 5,
+		BufferSize:           100,
+		Concurrency:          10,
+		RedisClient:          redisClient,
 	})
 	if err != nil {
 		return c, err

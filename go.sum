@@ -414,8 +414,8 @@ github.com/russross/blackfriday/v2 v2.1.0 h1:JIOH55/0cWyOuilr9/qlrm0BSXldqnqwMsf
 github.com/russross/blackfriday/v2 v2.1.0/go.mod h1:+Rmxgy9KzJVeS9/2gXHxylqXiyQDYRxCVz55jmeOWTM=
 github.com/sergi/go-diff v1.0.0 h1:Kpca3qRNrduNnOQeazBd0ysaKrUJiIuISHxogkT9RPQ=
 github.com/sergi/go-diff v1.0.0/go.mod h1:0CfEIISq7TuYL3j771MWULgwwjU+GofnZX9QAmXWZgo=
-github.com/shitamachi/redisqueue/v2 v2.2.1 h1:8nZPnJ+pQBf4InXNENf4srnivP3GsPnkdeEdUcUhgUc=
-github.com/shitamachi/redisqueue/v2 v2.2.1/go.mod h1:zjWcNMs8zsMQYrQ2nhvoZnwjzTRfx6RR6EmMvn4S6EE=
+github.com/shitamachi/redisqueue/v2 v2.2.2 h1:NT/3iqjxffH0rancslm66HWdhaV2JkUdbJ2nQ79szg0=
+github.com/shitamachi/redisqueue/v2 v2.2.2/go.mod h1:zjWcNMs8zsMQYrQ2nhvoZnwjzTRfx6RR6EmMvn4S6EE=
 github.com/shopspring/decimal v1.2.0/go.mod h1:DKyhrW/HYNuLGql+MJL6WCR6knT2jwCFRcu2hWCYk4o=
 github.com/shopspring/decimal v1.3.1 h1:2Usl1nmF/WZucqkFZhnfFYxxxu8LG21F6nPQBE5gKV8=
 github.com/shopspring/decimal v1.3.1/go.mod h1:DKyhrW/HYNuLGql+MJL6WCR6knT2jwCFRcu2hWCYk4o=
